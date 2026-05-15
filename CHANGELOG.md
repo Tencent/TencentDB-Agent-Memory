@@ -4,6 +4,22 @@
 
 ---
 
+## [Unreleased]
+
+### 📦 新功能
+
+- **Claude Code 插件**（`claude-code-plugin/`）：通过 cc 官方 `/plugin install tdai-memory` 一键启用，不修改用户 `~/.claude/settings.json`。提供 3 个 hooks（`SessionStart` 异步预热、`UserPromptSubmit` 同步召回并通过 `additionalContext` 注入、`Stop` 异步捕获），3 个 slash skills（`/memory-search`、`/memory-status`、`/memory-clear-session`），以及一个总览 skill `tdai-memory`。Daemon 通过 `gateway-entry.ts` wrapper 绑定父 cc 进程生命周期。
+
+### 🔧 兼容性 / 安全增强
+
+- **Gateway 可选 Bearer Token 鉴权**：当设置 `TDAI_GATEWAY_TOKEN` 环境变量时，Gateway 要求所有非 OPTIONS 请求带 `Authorization: Bearer <token>`。未设置时行为不变，与 Hermes 完全向后兼容。Claude Code 插件每次 spawn daemon 时生成随机 256-bit token 写入权限 0600 文件。
+
+### 📚 文档
+
+- `claude-code-plugin/README.md` 与 `README_CN.md`：安装、配置、数据布局、排障与安全模型完整说明。
+
+---
+
 ## [0.3.4] - 2026-05-12
 
 ### 🐛 修复
