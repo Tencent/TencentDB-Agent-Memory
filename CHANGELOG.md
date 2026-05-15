@@ -8,7 +8,7 @@
 
 ### 📦 新功能
 
-- **Claude Code 插件**（`claude-code-plugin/`）：通过 cc 官方 `/plugin install tdai-memory` 一键启用，不修改用户 `~/.claude/settings.json`。提供 3 个 hooks（`SessionStart` 异步预热、`UserPromptSubmit` 同步召回并通过 `additionalContext` 注入、`Stop` 异步捕获），3 个 slash skills（`/memory-search`、`/memory-status`、`/memory-clear-session`），以及一个总览 skill `tdai-memory`。Daemon 通过 `gateway-entry.ts` wrapper 绑定父 cc 进程生命周期。
+- **Claude Code + Codex CLI 插件**（`claude-code-plugin/`）：通过 Claude Code `/plugin install tdai-memory` 或 Codex CLI marketplace 一键启用，不修改用户 `~/.claude/settings.json` 或 `~/.codex/config.toml`。提供 3 个 hooks（`SessionStart` 异步预热、`UserPromptSubmit` 同步召回并通过 `additionalContext` 注入、`Stop` 异步捕获），3 个 slash skills（`/memory-search`、`/memory-status`、`/memory-clear-session`），以及一个总览 skill `tdai-memory`。Daemon 通过 `gateway-entry.ts` wrapper 绑定父进程生命周期。插件携带双 manifest（`.claude-plugin/plugin.json` 与 `.codex-plugin/plugin.json`），共享同一份 `hooks/hooks.json` 与 `skills/` —— cc v2026.4+ 与 Codex CLI v0.117+ 实现了对齐的 hook 协议，因此一套源码同时服务两个宿主。
 
 ### 🔧 兼容性 / 安全增强
 

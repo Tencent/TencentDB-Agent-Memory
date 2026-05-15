@@ -1,6 +1,8 @@
-# TencentDB Agent Memory — Claude Code 插件
+# TencentDB Agent Memory — Coding Agent 插件
 
-为 [Claude Code](https://claude.com/claude-code) 提供长期记忆 + 符号化短期记忆，由 [TencentDB Agent Memory](https://github.com/Tencent/TencentDB-Agent-Memory) 驱动。
+为 [Claude Code](https://claude.com/claude-code) 与 [OpenAI Codex CLI](https://developers.openai.com/codex/cli) 提供长期记忆 + 符号化短期记忆，由 [TencentDB Agent Memory](https://github.com/Tencent/TencentDB-Agent-Memory) 驱动。
+
+插件携带双 manifest（`.claude-plugin/plugin.json` 与 `.codex-plugin/plugin.json`），共享同一份 `hooks/hooks.json` 与 `skills/`。Claude Code（v2026.4+）与 Codex CLI（v0.117+）实现了同一份 hook 协议，因此一套源码同时服务两个宿主。
 
 [English version](./README.md)
 
@@ -14,13 +16,24 @@
 
 ## 安装
 
+### Claude Code
+
 ```bash
 /plugin install tdai-memory
 ```
 
-就这样。不需要改 `~/.claude/settings.json`，也没有全局配置需要维护。
+### Codex CLI
 
-第一次启动 cc 会话时，插件会在 8421–8430 端口拉起一个本地 daemon（即现有的 TDAI Gateway），并生成随机 Bearer token。状态保存在 `${CLAUDE_PLUGIN_DATA}`。
+```bash
+codex plugin marketplace add <marketplace-url>
+# 在 TUI 中启用：/plugin → 切换 tdai-memory
+```
+
+（一旦发布到 Codex marketplace，将变为一条命令安装。）
+
+---
+
+不需要改 `~/.claude/settings.json` 或 `~/.codex/config.toml`。第一次启动 session 时，插件会在 8421–8430 端口拉起一个本地 daemon（即现有的 TDAI Gateway），并生成随机 Bearer token。状态保存在 `${CLAUDE_PLUGIN_DATA}`。
 
 ## 配置
 

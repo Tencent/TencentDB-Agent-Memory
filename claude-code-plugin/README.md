@@ -1,6 +1,8 @@
-# TencentDB Agent Memory — Claude Code Plugin
+# TencentDB Agent Memory — Coding Agent Plugin
 
-Long-term + symbolic short-term memory for [Claude Code](https://claude.com/claude-code), powered by [TencentDB Agent Memory](https://github.com/Tencent/TencentDB-Agent-Memory).
+Long-term + symbolic short-term memory for [Claude Code](https://claude.com/claude-code) and [OpenAI Codex CLI](https://developers.openai.com/codex/cli), powered by [TencentDB Agent Memory](https://github.com/Tencent/TencentDB-Agent-Memory).
+
+The plugin ships dual manifests (`.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`) and reuses the same `hooks/hooks.json` and `skills/` — both Claude Code (v2026.4+) and Codex CLI (v0.117+) implement the same hook protocol, so a single source tree serves both hosts.
 
 [中文版](./README_CN.md)
 
@@ -14,13 +16,24 @@ Long-term + symbolic short-term memory for [Claude Code](https://claude.com/clau
 
 ## Installation
 
+### Claude Code
+
 ```bash
 /plugin install tdai-memory
 ```
 
-That's it. No `~/.claude/settings.json` edits, no global config to track.
+### Codex CLI
 
-The first time cc starts a session after installation, the plugin will spawn a local daemon (the existing TDAI Gateway) on port 8421–8430 with a randomly generated Bearer token. State persists under `${CLAUDE_PLUGIN_DATA}`.
+```bash
+codex plugin marketplace add <marketplace-url>
+# then enable in the TUI: /plugin → toggle tdai-memory
+```
+
+(Once published to the Codex marketplace, this becomes a one-liner.)
+
+---
+
+No `~/.claude/settings.json` or `~/.codex/config.toml` mutation. The first time a session starts after installation, the plugin spawns a local daemon (the existing TDAI Gateway) on port 8421–8430 with a randomly generated Bearer token. State persists under `${CLAUDE_PLUGIN_DATA}`.
 
 ## Configuration
 
