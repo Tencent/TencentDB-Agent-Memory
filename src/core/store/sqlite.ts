@@ -1140,32 +1140,27 @@ export class VectorStore implements IMemoryStore {
 
       if (rows.length === 0) return [];
 
-      const results: VectorSearchResult[] = [];
-
-      for (const { record_id, distance } of rows) {
-        // sqlite-vec returns null distance for zero vectors (cosine undefined when ‖v‖=0).
-        // Skip these — they are placeholder vectors from embedding-service-unavailable fallback.
+      // Filter out null/NaN distances (legacy zero-vector placeholders) first,
+      // then batch-fetch metadata in a single query to avoid N+1 round-trips.
+      const validRows = rows.filter(({ record_id, distance }) => {
         if (distance == null || Number.isNaN(distance)) {
           this.logger?.warn(
             `${TAG} [L1-search] record_id=${record_id} has null/NaN distance (likely zero vector) — skipping`,
           );
-          continue;
+          return false;
         }
+        return true;
+      });
 
-        const meta = this.stmtGetMeta.get(record_id) as
-          | {
-              content: string;
-              type: string;
-              priority: number;
-              scene_name: string;
-              session_key: string;
-              session_id: string;
-              timestamp_str: string;
-              timestamp_start: string;
-              timestamp_end: string;
-              metadata_json: string;
-            }
-          | undefined;
+      if (validRows.length === 0) return [];
+
+      // Batch metadata lookup: single query instead of N individual get() calls
+      const metaMap = this.batchGetL1Meta(validRows.map((r) => r.record_id));
+
+      const results: VectorSearchResult[] = [];
+
+      for (const { record_id, distance } of validRows) {
+        const meta = metaMap.get(record_id);
 
         if (!meta) {
           this.logger?.warn(`${TAG} [L1-search] record_id=${record_id} has vector but NO metadata (orphan)`);
@@ -1271,6 +1266,97 @@ export class VectorStore implements IMemoryStore {
         `${TAG} deleteBatch failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
+    }
+  }
+
+  /**
+   * Batch-fetch L1 metadata for a list of record IDs in a single query.
+   * Returns a Map keyed by record_id for O(1) lookup in the caller.
+   *
+   * **Fault-tolerant**: returns an empty Map on failure.
+   */
+  private batchGetL1Meta(recordIds: string[]): Map<string, {
+    content: string;
+    type: string;
+    priority: number;
+    scene_name: string;
+    session_key: string;
+    session_id: string;
+    timestamp_str: string;
+    timestamp_start: string;
+    timestamp_end: string;
+    metadata_json: string;
+  }> {
+    const empty = new Map<string, never>();
+    if (recordIds.length === 0) return empty;
+    try {
+      const placeholders = recordIds.map(() => "?").join(",");
+      const rows = this.db.prepare(`
+        SELECT record_id, content, type, priority, scene_name,
+               session_key, session_id, timestamp_str, timestamp_start, timestamp_end, metadata_json
+        FROM l1_records WHERE record_id IN (${placeholders})
+      `).all(...recordIds) as Array<{
+        record_id: string;
+        content: string;
+        type: string;
+        priority: number;
+        scene_name: string;
+        session_key: string;
+        session_id: string;
+        timestamp_str: string;
+        timestamp_start: string;
+        timestamp_end: string;
+        metadata_json: string;
+      }>;
+      const map = new Map<string, typeof rows[number]>();
+      for (const row of rows) map.set(row.record_id, row);
+      return map;
+    } catch (err) {
+      this.logger?.warn(
+        `${TAG} batchGetL1Meta failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return empty;
+    }
+  }
+
+  /**
+   * Batch-fetch L0 metadata for a list of record IDs in a single query.
+   * Returns a Map keyed by record_id for O(1) lookup in the caller.
+   *
+   * **Fault-tolerant**: returns an empty Map on failure.
+   */
+  private batchGetL0Meta(recordIds: string[]): Map<string, {
+    session_key: string;
+    session_id: string;
+    role: string;
+    message_text: string;
+    recorded_at: string;
+    timestamp: number;
+  }> {
+    const empty = new Map<string, never>();
+    if (recordIds.length === 0) return empty;
+    try {
+      const placeholders = recordIds.map(() => "?").join(",");
+      const rows = this.db.prepare(`
+        SELECT record_id, session_key, session_id, role, message_text, recorded_at, timestamp
+        FROM l0_conversations WHERE record_id IN (${placeholders})
+      `).all(...recordIds) as Array<{
+        record_id: string;
+        session_key: string;
+        session_id: string;
+        role: string;
+        message_text: string;
+        recorded_at: string;
+        timestamp: number;
+      }>;
+      const map = new Map<string, typeof rows[number]>();
+      for (const row of rows) map.set(row.record_id, row);
+      return map;
+    } catch (err) {
+      this.logger?.warn(
+        `${TAG} batchGetL0Meta failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return empty;
     }
   }
 
@@ -1573,28 +1659,27 @@ export class VectorStore implements IMemoryStore {
 
       if (rows.length === 0) return [];
 
-      const results: L0VectorSearchResult[] = [];
-
-      for (const { record_id, distance } of rows) {
-        // sqlite-vec returns null distance for zero vectors (cosine undefined when ‖v‖=0).
-        // Skip these — they are placeholder vectors from embedding-service-unavailable fallback.
+      // Filter out null/NaN distances (legacy zero-vector placeholders) first,
+      // then batch-fetch metadata in a single query to avoid N+1 round-trips.
+      const validRows = rows.filter(({ record_id, distance }) => {
         if (distance == null || Number.isNaN(distance)) {
           this.logger?.warn(
             `${TAG} [L0-search] record_id=${record_id} has null/NaN distance (likely zero vector) — skipping`,
           );
-          continue;
+          return false;
         }
+        return true;
+      });
 
-        const meta = this.stmtL0GetMeta.get(record_id) as
-          | {
-              session_key: string;
-              session_id: string;
-              role: string;
-              message_text: string;
-              recorded_at: string;
-              timestamp: number;
-            }
-          | undefined;
+      if (validRows.length === 0) return [];
+
+      // Batch metadata lookup: single query instead of N individual get() calls
+      const metaMap = this.batchGetL0Meta(validRows.map((r) => r.record_id));
+
+      const results: L0VectorSearchResult[] = [];
+
+      for (const { record_id, distance } of validRows) {
+        const meta = metaMap.get(record_id);
 
         if (!meta) {
           this.logger?.warn(`${TAG} [L0-search] record_id=${record_id} has vector but NO metadata (orphan)`);
