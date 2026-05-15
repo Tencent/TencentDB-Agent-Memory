@@ -24,6 +24,7 @@ export type HookEvent =
   | "post-tool-use"
   | "stop"
   | "search"
+  | "search-stdin"
   | "status"
   | "clear-session";
 
@@ -46,6 +47,8 @@ export async function handleHook(event: HookEvent, input: HookInput): Promise<st
       return handleStop(data, input.client);
     case "search":
       return handleSearch(input.args ?? [], input.client);
+    case "search-stdin":
+      return handleSearchStdin(input.stdin, input.client);
     case "status":
       return handleStatus(input.client);
     case "clear-session":
@@ -179,6 +182,19 @@ async function handleStop(data: HookStdin, client: GatewayClient): Promise<strin
 async function handleSearch(args: string[], client: GatewayClient): Promise<string> {
   const query = args.join(" ").trim();
   if (!query) return "Usage: /memory-search <query>";
+  const result = await client.searchMemories(query, { limit: 10 });
+  return result.results || "No memories found.";
+}
+
+/**
+ * Read the query from stdin instead of argv. Used by the memory-search skill
+ * to avoid the cc `$ARGUMENTS` literal-replaceAll RCE surface (see Anthropic
+ * GH issue #16163) — when the query rides on stdin it never touches a shell
+ * word-split or expansion stage.
+ */
+async function handleSearchStdin(rawStdin: string, client: GatewayClient): Promise<string> {
+  const query = rawStdin.trim();
+  if (!query) return "Usage: pipe the query to stdin";
   const result = await client.searchMemories(query, { limit: 10 });
   return result.results || "No memories found.";
 }

@@ -78,8 +78,23 @@ export class DaemonManager {
 
   async readToken(tokenPath: string): Promise<string> {
     const st = await stat(tokenPath);
-    if ((st.mode & 0o077) !== 0) {
+    // Windows' Node fs reports mode bits that don't map to POSIX rwx, so
+    // the 0o077 check would always fire and block Windows users entirely.
+    // Skip the bit-level check there and rely on the NTFS ACL the OS gave
+    // the file at create time.
+    if (process.platform !== "win32" && (st.mode & 0o077) !== 0) {
       throw new Error(`Token file permission too loose: ${tokenPath}`);
+    }
+    // Owner check: refuse to read a token file we don't own. Guards the
+    // multi-user case where ~/.tdai-memory is on a shared FS and a peer
+    // UID could pre-create the file to phish the daemon.
+    if (process.platform !== "win32" && typeof process.getuid === "function") {
+      const uid = process.getuid();
+      if (st.uid !== uid) {
+        throw new Error(
+          `Token file owner mismatch: expected uid=${uid}, got uid=${st.uid} for ${tokenPath}`,
+        );
+      }
     }
     const raw = await readFile(tokenPath, "utf-8");
     return raw.trim();
@@ -142,13 +157,17 @@ export class DaemonManager {
   async ensureRunning(ccPid: number): Promise<DaemonState> {
     const existing = await readDaemonState(this.dataDir);
     if (existing) {
+      // Refuse to reuse a daemon spawned for a different cc instance. Without
+      // this check, a stale state.json from a previous user/session on a shared
+      // box could route this session's recall/capture to someone else's daemon.
+      const ccPidMatches = existing.ccPid === ccPid;
       let existingToken = "";
       try {
         existingToken = await this.readToken(existing.tokenPath);
       } catch {
         // fallthrough to spawn
       }
-      if (existingToken) {
+      if (ccPidMatches && existingToken) {
         // First probe.
         if (await this.healthCheck(existing.port, existingToken)) return existing;
         // Daemon may still be coming up (another hook just spawned it).
@@ -180,13 +199,15 @@ export class DaemonManager {
       ? []
       : ["--yes", "tdai-memory-gateway"];
 
+    // Pass the token by FILE PATH, not as an env var. execve() snapshots the
+    // initial environment block and exposes it via /proc/<pid>/environ /
+    // `ps -E` to any peer process with the same UID — a token file gated by
+    // 0600 + owner check is a smaller attack surface.
+    const childEnv = { ...process.env, TDAI_GATEWAY_PORT: String(port), TDAI_CC_PID: String(ccPid), TDAI_TOKEN_PATH: tokenPath } as NodeJS.ProcessEnv;
+    delete childEnv.TDAI_GATEWAY_TOKEN;
+
     const child: ChildProcess = spawn(command, args, {
-      env: {
-        ...process.env,
-        TDAI_GATEWAY_TOKEN: token,
-        TDAI_GATEWAY_PORT: String(port),
-        TDAI_CC_PID: String(ccPid),
-      },
+      env: childEnv,
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
     });
