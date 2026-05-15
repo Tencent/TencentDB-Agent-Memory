@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { handleHook } from "../lib/hook.js";
 import type { GatewayClient, RecallResult } from "../lib/gateway-client.js";
 
@@ -141,6 +144,19 @@ describe("handleHook: user-prompt-submit", () => {
 });
 
 describe("handleHook: stop", () => {
+  // Stop now persists a per-session cursor to $CLAUDE_PLUGIN_DATA/cursors/.
+  // Isolate it to a tmpdir per test so cursor state never leaks across runs
+  // (a previously-written cursor would make the next run see lastSent>0 and
+  // suppress the captureTurn call this test asserts on).
+  let cursorDir: string;
+  beforeEach(async () => {
+    cursorDir = await mkdtemp(join(tmpdir(), "tdai-stop-cursor-"));
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", cursorDir);
+  });
+  afterEach(async () => {
+    await rm(cursorDir, { recursive: true, force: true });
+  });
+
   it("exits silently when stop_hook_active is true", async () => {
     const captureTurn = vi.fn();
     const client = makeFakeClient({

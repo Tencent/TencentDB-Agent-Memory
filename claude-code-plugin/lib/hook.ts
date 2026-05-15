@@ -13,10 +13,12 @@ import { GatewayClient } from "./gateway-client.js";
 import { getSessionKey } from "./session-key.js";
 import { readAllTurns } from "./transcript.js";
 import { DaemonManager, readDaemonState } from "./daemon.js";
-import { appendFile, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { homedir } from "node:os";
 
 const MAX_INJECT_CHARS = 10_000;
+const MAX_CAPTURE_TURNS = 50;
 
 export type HookEvent =
   | "session-start"
@@ -147,28 +149,42 @@ async function handleStop(data: HookStdin, client: GatewayClient): Promise<strin
   if (data.stop_hook_active === true) return "";
   if (!data.transcript_path) return "";
 
-  // cc may trigger the Stop hook before the transcript file is fully flushed
-  // to disk. A short delay lets the last assistant entry land.
-  await new Promise((r) => setTimeout(r, 800));
+  // cc may trigger Stop before the last assistant block is flushed to disk.
+  // Poll the file size until two consecutive 100ms ticks see identical bytes,
+  // capped at 2s. Replaces a fragile 800ms hard sleep that still missed slow
+  // disks on real-machine validation.
+  await waitForTranscriptStable(data.transcript_path, 2_000);
 
   const allTurns = await readAllTurns(data.transcript_path);
   if (allTurns.length === 0) return "";
 
-  // Only capture the most recent turns to avoid flooding L0 with an
-  // entire long session's history. Earlier turns from the same session
-  // will be captured in subsequent Stop events if the user continues.
-  const MAX_CAPTURE_TURNS = 10;
-  const turns = allTurns.slice(-MAX_CAPTURE_TURNS);
+  // Persist a per-session cursor so the next Stop only sends turns appended
+  // after this one. Without it, every Stop posts the latest N turns and the
+  // Gateway writes them to L0 again, duplicating long sessions across calls.
+  const dataDir = resolveDataDir();
+  const cursorId = sanitizeCursorId(
+    data.session_id ?? (basename(data.transcript_path).replace(/\.jsonl$/, "") || "default"),
+  );
+  const lastSent = await readCursor(dataDir, cursorId);
+
+  let newTurns = allTurns.slice(lastSent);
+  if (newTurns.length === 0) return "";
+
+  // Bound the first capture so a pre-existing long transcript doesn't dump
+  // hundreds of turns in a single /capture request.
+  if (newTurns.length > MAX_CAPTURE_TURNS) {
+    newTurns = newTurns.slice(-MAX_CAPTURE_TURNS);
+  }
 
   const cwd = data.cwd ?? process.cwd();
   const sessionKey = getSessionKey(cwd);
 
-  const messages = turns.flatMap((t) => [
+  const messages = newTurns.flatMap((t) => [
     { role: "user" as const, content: t.user },
     { role: "assistant" as const, content: t.assistant },
   ]);
 
-  const lastTurn = turns[turns.length - 1];
+  const lastTurn = newTurns[newTurns.length - 1];
   await client.captureTurn({
     user_content: lastTurn.user,
     assistant_content: lastTurn.assistant,
@@ -176,7 +192,63 @@ async function handleStop(data: HookStdin, client: GatewayClient): Promise<strin
     session_key: sessionKey,
     session_id: data.session_id,
   });
+  await writeCursor(dataDir, cursorId, allTurns.length);
   return "";
+}
+
+async function waitForTranscriptStable(path: string, maxMs: number): Promise<void> {
+  const start = Date.now();
+  let lastSize = -1;
+  let stableTicks = 0;
+  while (Date.now() - start < maxMs) {
+    try {
+      const st = await stat(path);
+      if (st.size === lastSize) {
+        stableTicks++;
+        if (stableTicks >= 2) return;
+      } else {
+        stableTicks = 0;
+        lastSize = st.size;
+      }
+    } catch {
+      // not yet written
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+function resolveDataDir(): string {
+  return process.env.CLAUDE_PLUGIN_DATA ?? join(homedir(), ".tdai-memory");
+}
+
+function sanitizeCursorId(id: string): string {
+  return id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "default";
+}
+
+async function readCursor(dataDir: string, cursorId: string): Promise<number> {
+  try {
+    const raw = await readFile(join(dataDir, "cursors", `${cursorId}.json`), "utf-8");
+    const obj = JSON.parse(raw) as { lastSentIndex?: unknown };
+    return typeof obj.lastSentIndex === "number" && obj.lastSentIndex >= 0
+      ? obj.lastSentIndex
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeCursor(dataDir: string, cursorId: string, lastSentIndex: number): Promise<void> {
+  const dir = join(dataDir, "cursors");
+  await mkdir(dir, { recursive: true });
+  const tmp = join(dir, `${cursorId}.json.tmp`);
+  const final = join(dir, `${cursorId}.json`);
+  await writeFile(
+    tmp,
+    JSON.stringify({ lastSentIndex, updatedAt: new Date().toISOString() }),
+    { mode: 0o600 },
+  );
+  // Atomic replace so a crashed write never corrupts the cursor file.
+  await rename(tmp, final);
 }
 
 async function handleSearch(args: string[], client: GatewayClient): Promise<string> {
