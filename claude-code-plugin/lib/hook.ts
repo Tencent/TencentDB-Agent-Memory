@@ -11,9 +11,9 @@
 
 import { GatewayClient } from "./gateway-client.js";
 import { getSessionKey } from "./session-key.js";
-import { readLatestTurn } from "./transcript.js";
+import { readAllTurns } from "./transcript.js";
 import { DaemonManager, readDaemonState } from "./daemon.js";
-import { appendFile } from "node:fs/promises";
+import { appendFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const MAX_INJECT_CHARS = 10_000;
@@ -88,8 +88,34 @@ async function handleUserPromptSubmit(data: HookStdin, client: GatewayClient): P
   if (!prompt) return "";
 
   const sessionKey = getSessionKey(cwd);
-  const result = await client.recall(prompt, sessionKey);
-  let context = result.context ?? "";
+
+  // Primary path: L1/L2/L3 recall (structured atoms + persona + scene).
+  const recall = await client.recall(prompt, sessionKey);
+  let context = recall.context ?? "";
+
+  // Fallback 1: daemon /search/conversations (FTS5 BM25 on L0 table).
+  if (!context) {
+    const conv = await client.searchConversations(prompt, {
+      limit: 3,
+      sessionKey,
+    });
+    if (conv.total > 0 && conv.results) {
+      context = `## Past conversations (relevant to current prompt)\n\n${conv.results}`;
+    }
+  }
+
+  // Fallback 2: direct L0 jsonl file scan. Covers the case where FTS5 is
+  // unavailable (e.g. Node.js built-in node:sqlite lacks fts5 module) AND
+  // no embedding service is configured. Reads $TDAI_DATA_DIR/conversations/
+  // and does simple keyword matching — no ranking, but good enough to
+  // surface relevant history on day zero.
+  if (!context) {
+    const dataDir = process.env.TDAI_DATA_DIR;
+    if (dataDir) {
+      context = await searchL0JsonlDirect(join(dataDir, "conversations"), prompt, sessionKey, 3);
+    }
+  }
+
   if (!context) return "";
 
   if (context.length > MAX_INJECT_CHARS) {
@@ -118,15 +144,32 @@ async function handleStop(data: HookStdin, client: GatewayClient): Promise<strin
   if (data.stop_hook_active === true) return "";
   if (!data.transcript_path) return "";
 
-  const turn = await readLatestTurn(data.transcript_path);
-  if (!turn) return "";
+  // cc may trigger the Stop hook before the transcript file is fully flushed
+  // to disk. A short delay lets the last assistant entry land.
+  await new Promise((r) => setTimeout(r, 800));
+
+  const allTurns = await readAllTurns(data.transcript_path);
+  if (allTurns.length === 0) return "";
+
+  // Only capture the most recent turns to avoid flooding L0 with an
+  // entire long session's history. Earlier turns from the same session
+  // will be captured in subsequent Stop events if the user continues.
+  const MAX_CAPTURE_TURNS = 10;
+  const turns = allTurns.slice(-MAX_CAPTURE_TURNS);
 
   const cwd = data.cwd ?? process.cwd();
   const sessionKey = getSessionKey(cwd);
 
+  const messages = turns.flatMap((t) => [
+    { role: "user" as const, content: t.user },
+    { role: "assistant" as const, content: t.assistant },
+  ]);
+
+  const lastTurn = turns[turns.length - 1];
   await client.captureTurn({
-    user_content: turn.user,
-    assistant_content: turn.assistant,
+    user_content: lastTurn.user,
+    assistant_content: lastTurn.assistant,
+    messages,
     session_key: sessionKey,
     session_id: data.session_id,
   });
@@ -150,6 +193,112 @@ async function handleClearSession(data: HookStdin, client: GatewayClient): Promi
   const sessionKey = getSessionKey(cwd);
   await client.sessionEnd(sessionKey);
   return `Cleared session buffer for: ${sessionKey}`;
+}
+
+// ============================================================================
+// L0 jsonl direct search (last-resort fallback)
+// ============================================================================
+
+interface L0JsonlRecord {
+  sessionKey?: string;
+  role?: string;
+  content?: string;
+  recordedAt?: string;
+}
+
+async function searchL0JsonlDirect(
+  convDir: string,
+  query: string,
+  sessionKey: string,
+  limit: number,
+): Promise<string> {
+  let files: string[];
+  try {
+    files = (await readdir(convDir)).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+  } catch {
+    return "";
+  }
+  if (files.length === 0) return "";
+
+  // Split CJK text into individual characters (1-gram) for matching, since
+  // we don't have a segmentation library here. Latin tokens use word split.
+  const CJK_STOP = new Set([
+    "之前", "前聊", "聊的", "还记", "记得", "得么", "一下", "怎么",
+    "什么", "关于", "知道", "以前", "上次", "那个", "这个", "可以",
+    "我们", "你们", "他们", "就是", "不是", "有没", "没有",
+  ]);
+  const keywords: string[] = [];
+  for (const seg of query.toLowerCase().replace(/[^\w一-鿿]/g, " ").split(/\s+/)) {
+    if (!seg) continue;
+    if (/[一-鿿]/.test(seg)) {
+      for (let i = 0; i <= seg.length - 2; i++) {
+        const gram = seg.slice(i, i + 2);
+        if (!CJK_STOP.has(gram)) keywords.push(gram);
+      }
+    } else if (seg.length >= 2) {
+      keywords.push(seg);
+    }
+  }
+  if (keywords.length === 0) return "";
+
+  type Match = { role: string; content: string; recordedAt: string; hits: number };
+  const matches: Match[] = [];
+  const seen = new Set<string>();
+
+  for (const f of files) {
+    let raw: string;
+    try {
+      raw = await readFile(join(convDir, f), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line) as L0JsonlRecord;
+        if (rec.sessionKey !== sessionKey) continue;
+        const text = rec.content ?? "";
+        const textLower = text.toLowerCase();
+        const hits = keywords.filter((kw) => textLower.includes(kw)).length;
+        if (hits === 0) continue;
+        // Deduplicate identical content (e.g. repeated user prompts).
+        const fingerprint = text.slice(0, 120);
+        if (seen.has(fingerprint)) continue;
+        seen.add(fingerprint);
+        matches.push({
+          role: rec.role ?? "unknown",
+          content: text.length > 2000 ? text.slice(0, 2000) + "…" : text,
+          recordedAt: rec.recordedAt ?? "",
+          hits,
+        });
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+
+  if (matches.length === 0) return "";
+
+  // Rank: assistant messages first (more informative than user prompts),
+  // then by keyword hits (desc), then content length (desc).
+  const rolePriority = (r: string) => (r === "assistant" ? 1 : 0);
+  matches.sort(
+    (a, b) =>
+      rolePriority(b.role) - rolePriority(a.role) ||
+      b.hits - a.hits ||
+      b.content.length - a.content.length,
+  );
+
+  const selected = matches.slice(0, limit);
+  const lines = [`Found ${selected.length} matching conversation(s):`, ""];
+  for (const m of selected) {
+    lines.push("---");
+    lines.push(`**[${m.role}]** ${m.recordedAt}`);
+    lines.push("");
+    lines.push(m.content);
+    lines.push("");
+  }
+  return `## Past conversations (relevant to current prompt)\n\n${lines.join("\n")}`;
 }
 
 // ============================================================================

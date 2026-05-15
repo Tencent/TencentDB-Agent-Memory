@@ -148,8 +148,16 @@ export class DaemonManager {
       } catch {
         // fallthrough to spawn
       }
-      if (existingToken && (await this.healthCheck(existing.port, existingToken))) {
-        return existing;
+      if (existingToken) {
+        // First probe.
+        if (await this.healthCheck(existing.port, existingToken)) return existing;
+        // Daemon may still be coming up (another hook just spawned it).
+        // Wait briefly and retry once before deciding to respawn.
+        const deadline = Date.now() + 10_000;
+        while (Date.now() < deadline) {
+          await sleep(500);
+          if (await this.healthCheck(existing.port, existingToken)) return existing;
+        }
       }
     }
     return this.spawn(ccPid);
@@ -188,23 +196,35 @@ export class DaemonManager {
       throw new Error("Failed to spawn daemon: child has no pid");
     }
 
-    const deadline = Date.now() + 10_000;
+    // Write state.json IMMEDIATELY so concurrent hooks (e.g. Stop firing
+    // before SessionStart's spawn finishes its health probe) see that a
+    // daemon is being brought up and can wait for it via ensureRunning's
+    // health-retry loop, instead of treating it as "no daemon".
+    const pendingState: DaemonState = {
+      pid: child.pid,
+      port,
+      ccPid,
+      startedAt: new Date().toISOString(),
+      tokenPath,
+    };
+    await writeDaemonState(this.dataDir, pendingState);
+
+    // Gateway cold-start needs to init SQLite + sqlite-vec + BM25 encoder +
+    // pipeline + LLM runner. On slower machines this can exceed 10s, so give
+    // it 30s. The hook is async (cc doesn't block on it) so the longer
+    // budget doesn't impact UX.
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       if (await this.healthCheck(port, token, 500)) {
-        const state: DaemonState = {
-          pid: child.pid,
-          port,
-          ccPid,
-          startedAt: new Date().toISOString(),
-          tokenPath,
-        };
-        await writeDaemonState(this.dataDir, state);
-        return state;
+        return pendingState;
       }
       await sleep(200);
     }
 
-    throw new Error(`Daemon did not become healthy on port ${port} within 10s`);
+    // Health probe timed out. Remove the pending state so subsequent hooks
+    // don't keep waiting on a daemon that never came up.
+    await clearDaemonState(this.dataDir);
+    throw new Error(`Daemon did not become healthy on port ${port} within 30s`);
   }
 }
 
