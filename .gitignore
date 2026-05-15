@@ -45,5 +45,8 @@ test-offload-sessions.sh
 # Local development notes (contributor-only, not shipped)
 docs/superpowers/
 
+# Per-developer Claude Code project instructions (contributor-only)
+CLAUDE.md
+
 # Plugin build output
 claude-code-plugin/dist/
