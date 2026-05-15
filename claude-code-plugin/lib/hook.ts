@@ -14,6 +14,8 @@ import { getSessionKey } from "./session-key.js";
 import { readAllTurns } from "./transcript.js";
 import { DaemonManager, readDaemonState } from "./daemon.js";
 import { appendFile, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -302,18 +304,37 @@ async function searchL0JsonlDirect(
 ): Promise<string> {
   let files: string[];
   try {
-    files = (await readdir(convDir)).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+    files = (await readdir(convDir)).filter((f) => f.endsWith(".jsonl"));
   } catch {
     return "";
   }
   if (files.length === 0) return "";
 
-  // Split CJK text into individual characters (1-gram) for matching, since
-  // we don't have a segmentation library here. Latin tokens use word split.
+  // Sort by mtime desc so newer conversations are scanned first. Filename
+  // ordering used to assume "YYYY-MM-DD.jsonl" naming, which broke for any
+  // other scheme (e.g. cc transcript UUIDs).
+  const withMtime = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const st = await stat(join(convDir, f));
+        return { name: f, mtime: st.mtimeMs };
+      } catch {
+        return { name: f, mtime: 0 };
+      }
+    }),
+  );
+  withMtime.sort((a, b) => b.mtime - a.mtime);
+  const sortedFiles = withMtime.map((e) => e.name);
+
+  // CJK 2-gram tokens, sans a small stop set. The previous list stopped
+  // common content-bearing pronouns ("我们/你们/这个/可以/有没/没有" etc.)
+  // which silently shredded recall for everyday Chinese queries — keep only
+  // genuinely low-signal interrogative / connective fragments here.
   const CJK_STOP = new Set([
-    "之前", "前聊", "聊的", "还记", "记得", "得么", "一下", "怎么",
-    "什么", "关于", "知道", "以前", "上次", "那个", "这个", "可以",
-    "我们", "你们", "他们", "就是", "不是", "有没", "没有",
+    "之前", "前聊", "聊的", "还记", "记得", "得么", "得吗",
+    "一下", "怎么", "什么", "关于", "知道", "以前", "上次",
+    "如何", "为何", "为啥", "哪里", "哪些", "为什",
+    "请问", "请帮", "帮我", "麻烦",
   ]);
   const keywords: string[] = [];
   for (const seg of query.toLowerCase().replace(/[^\w一-鿿]/g, " ").split(/\s+/)) {
@@ -333,35 +354,44 @@ async function searchL0JsonlDirect(
   const matches: Match[] = [];
   const seen = new Set<string>();
 
-  for (const f of files) {
-    let raw: string;
+  for (const f of sortedFiles) {
+    // Stream the file line-by-line: large jsonl (multi-MB) used to be
+    // readFile'd into memory in full, which OOM'd on long-running sessions.
+    let rl;
     try {
-      raw = await readFile(join(convDir, f), "utf-8");
+      rl = createInterface({
+        input: createReadStream(join(convDir, f), { encoding: "utf-8" }),
+        crlfDelay: Infinity,
+      });
     } catch {
       continue;
     }
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const rec = JSON.parse(line) as L0JsonlRecord;
-        if (rec.sessionKey !== sessionKey) continue;
-        const text = rec.content ?? "";
-        const textLower = text.toLowerCase();
-        const hits = keywords.filter((kw) => textLower.includes(kw)).length;
-        if (hits === 0) continue;
-        // Deduplicate identical content (e.g. repeated user prompts).
-        const fingerprint = text.slice(0, 120);
-        if (seen.has(fingerprint)) continue;
-        seen.add(fingerprint);
-        matches.push({
-          role: rec.role ?? "unknown",
-          content: text.length > 2000 ? text.slice(0, 2000) + "…" : text,
-          recordedAt: rec.recordedAt ?? "",
-          hits,
-        });
-      } catch {
-        // skip malformed lines
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          const rec = JSON.parse(line) as L0JsonlRecord;
+          if (rec.sessionKey !== sessionKey) continue;
+          const text = rec.content ?? "";
+          const textLower = text.toLowerCase();
+          const hits = keywords.filter((kw) => textLower.includes(kw)).length;
+          if (hits === 0) continue;
+          // Deduplicate identical content (e.g. repeated user prompts).
+          const fingerprint = text.slice(0, 120);
+          if (seen.has(fingerprint)) continue;
+          seen.add(fingerprint);
+          matches.push({
+            role: rec.role ?? "unknown",
+            content: text.length > 2000 ? text.slice(0, 2000) + "…" : text,
+            recordedAt: rec.recordedAt ?? "",
+            hits,
+          });
+        } catch {
+          // skip malformed lines
+        }
       }
+    } finally {
+      rl.close();
     }
   }
 
