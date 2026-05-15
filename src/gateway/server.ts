@@ -176,13 +176,24 @@ export class TdaiGateway {
     // CORS headers (for development)
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (method === "OPTIONS") {
       res.writeHead(204);
       res.end();
       return;
     }
+
+    // ----- BEGIN: Optional Bearer token auth (added for Claude Code plugin) -----
+    const expectedToken = process.env.TDAI_GATEWAY_TOKEN;
+    if (expectedToken) {
+      const authHeader = req.headers.authorization;
+      if (authHeader !== `Bearer ${expectedToken}`) {
+        sendError(res, 401, "Unauthorized");
+        return;
+      }
+    }
+    // ----- END: Optional Bearer token auth -----
 
     try {
       switch (`${method} ${pathname}`) {
