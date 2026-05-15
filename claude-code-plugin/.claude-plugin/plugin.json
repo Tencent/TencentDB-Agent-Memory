@@ -4,5 +4,8 @@
   "description": "Long-term + symbolic short-term memory for Claude Code, powered by TencentDB Agent Memory.",
   "homepage": "https://github.com/Tencent/TencentDB-Agent-Memory",
   "license": "MIT",
-  "author": "李冠辰 <liguanchen@xiaomi.com>"
+  "author": {
+    "name": "李冠辰",
+    "email": "liguanchen@xiaomi.com"
+  }
 }
