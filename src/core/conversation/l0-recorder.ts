@@ -18,6 +18,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { sanitizeText, stripCodeBlocks, shouldCaptureL0 } from "../../utils/sanitize.js";
+import type { Logger } from "../types.js";
 
 // ============================
 // Types
@@ -61,13 +62,6 @@ export interface L0ConversationRecord {
   recordedAt: string; // ISO timestamp
   messageCount: number;
   messages: ConversationMessage[];
-}
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
 }
 
 const TAG = "[memory-tdai][l0]";

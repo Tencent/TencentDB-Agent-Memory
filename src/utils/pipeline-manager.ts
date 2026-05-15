@@ -81,17 +81,11 @@ import { SessionFilter } from "./session-filter.js";
 import { ManagedTimer } from "./managed-timer.js";
 import { SerialQueue } from "./serial-queue.js";
 import { report } from "../core/report/reporter.js";
+import type { Logger } from "../core/types.js";
 
 // ============================
 // Types
 // ============================
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
-}
 
 /** A single captured message ready for L1 processing. */
 export interface CapturedMessage {
