@@ -7,7 +7,8 @@
   "bin": {
     "migrate-sqlite-to-tcvdb": "./bin/migrate-sqlite-to-tcvdb.mjs",
     "export-tencent-vdb": "./bin/export-tencent-vdb.mjs",
-    "read-local-memory": "./bin/read-local-memory.mjs"
+    "read-local-memory": "./bin/read-local-memory.mjs",
+    "tdai-memory-gateway": "./dist/src/gateway/cli.mjs"
   },
   "exports": {
     ".": {
@@ -49,7 +50,8 @@
     "scripts/openclaw-after-tool-call-messages.patch.sh",
     "scripts/setup-offload.sh",
     "hermes-plugin/",
-    "claude-code-plugin/plugin.json",
+    "claude-code-plugin/.claude-plugin/",
+    "claude-code-plugin/.codex-plugin/",
     "claude-code-plugin/hooks/",
     "claude-code-plugin/skills/",
     "claude-code-plugin/dist/",

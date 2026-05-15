@@ -16,6 +16,16 @@ The plugin ships dual manifests (`.claude-plugin/plugin.json` and `.codex-plugin
 
 ## Installation
 
+### Prerequisite
+
+Install the gateway runtime (the `tdai-memory-gateway` bin) globally — the plugin spawns the daemon via `npx tdai-memory-gateway`:
+
+```bash
+npm install -g @tencentdb-agent-memory/memory-tencentdb
+```
+
+This npm package contains the actual `TdaiGateway` (SQLite + sqlite-vec + LLM pipeline). The plugin itself is a thin shim that owns hooks, skills, and the per-session sessionKey — it does NOT bundle the heavy deps.
+
 ### Claude Code
 
 ```bash
@@ -33,7 +43,7 @@ codex plugin marketplace add <marketplace-url>
 
 ---
 
-No `~/.claude/settings.json` or `~/.codex/config.toml` mutation. The first time a session starts after installation, the plugin spawns a local daemon (the existing TDAI Gateway) on port 8421–8430 with a randomly generated Bearer token. State persists under `${CLAUDE_PLUGIN_DATA}`.
+No `~/.claude/settings.json` or `~/.codex/config.toml` mutation. The first time a session starts after installation, the plugin spawns the local daemon (via `npx tdai-memory-gateway`) on port 8421–8430 with a randomly generated Bearer token. State persists under `${CLAUDE_PLUGIN_DATA}`.
 
 ## Configuration
 
@@ -43,7 +53,7 @@ The plugin reads three optional environment variables:
 |---|---|---|
 | `TDAI_SESSION_KEY` | `hash(cwd)` | Override the per-project memory partition |
 | `TDAI_GATEWAY_TOKEN` | auto-generated | Bearer token for daemon ↔ hook IPC |
-| `TDAI_GATEWAY_ENTRY` | resolved from plugin | Path to the Gateway entry script |
+| `TDAI_GATEWAY_COMMAND` | `npx` | Override daemon spawn command (advanced; e.g. `node /path/to/cli.mjs` for development) |
 
 Most users never need to set any of these. `TDAI_SESSION_KEY=shared-with-other-project` is the most common power-user override.
 

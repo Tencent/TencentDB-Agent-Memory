@@ -13,6 +13,7 @@
 ### 🔧 兼容性 / 安全增强
 
 - **Gateway 可选 Bearer Token 鉴权**：当设置 `TDAI_GATEWAY_TOKEN` 环境变量时，Gateway 要求所有非 OPTIONS 请求带 `Authorization: Bearer <token>`。未设置时行为不变，与 Hermes 完全向后兼容。Claude Code 插件每次 spawn daemon 时生成随机 256-bit token 写入权限 0600 文件。
+- **新增 `tdai-memory-gateway` bin**（`./dist/src/gateway/cli.mjs`）：作为独立可执行 Gateway entry point，支持 `SIGTERM/SIGINT` 优雅关闭、可选父进程 PID liveness 探活（`TDAI_CC_PID` 环境变量）。供 Claude Code / Codex CLI 插件通过 `npx tdai-memory-gateway` 调用，无需把 npm 依赖打包进插件。
 
 ### 📚 文档
 

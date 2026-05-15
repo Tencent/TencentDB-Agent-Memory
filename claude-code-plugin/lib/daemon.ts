@@ -139,7 +139,7 @@ export class DaemonManager {
     });
   }
 
-  async ensureRunning(ccPid: number, gatewayEntry: string): Promise<DaemonState> {
+  async ensureRunning(ccPid: number): Promise<DaemonState> {
     const existing = await readDaemonState(this.dataDir);
     if (existing) {
       let existingToken = "";
@@ -152,28 +152,36 @@ export class DaemonManager {
         return existing;
       }
     }
-    return this.spawn(ccPid, gatewayEntry);
+    return this.spawn(ccPid);
   }
 
-  async spawn(ccPid: number, gatewayEntry: string): Promise<DaemonState> {
+  /**
+   * Spawn the Gateway daemon by invoking `npx tdai-memory-gateway`.
+   *
+   * The user must have `@tencentdb-agent-memory/memory-tencentdb` installed,
+   * either globally (`npm install -g`) or in the current project (which exposes
+   * the `tdai-memory-gateway` bin via npx's PATH resolution).
+   */
+  async spawn(ccPid: number): Promise<DaemonState> {
     const port = await this.findFreePort();
     const tokenPath = await this.generateToken();
     const token = await this.readToken(tokenPath);
 
-    const child: ChildProcess = spawn(
-      process.execPath,
-      [gatewayEntry],
-      {
-        env: {
-          ...process.env,
-          TDAI_GATEWAY_TOKEN: token,
-          TDAI_GATEWAY_PORT: String(port),
-          TDAI_CC_PID: String(ccPid),
-        },
-        detached: true,
-        stdio: ["ignore", "ignore", "ignore"],
+    const command = process.env.TDAI_GATEWAY_COMMAND ?? "npx";
+    const args = process.env.TDAI_GATEWAY_COMMAND
+      ? []
+      : ["--yes", "tdai-memory-gateway"];
+
+    const child: ChildProcess = spawn(command, args, {
+      env: {
+        ...process.env,
+        TDAI_GATEWAY_TOKEN: token,
+        TDAI_GATEWAY_PORT: String(port),
+        TDAI_CC_PID: String(ccPid),
       },
-    );
+      detached: true,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
     child.unref();
 
     if (!child.pid) {

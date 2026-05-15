@@ -16,6 +16,16 @@
 
 ## 安装
 
+### 前置条件
+
+先全局安装 gateway 运行时（提供 `tdai-memory-gateway` 命令）—— 插件通过 `npx tdai-memory-gateway` 启动 daemon：
+
+```bash
+npm install -g @tencentdb-agent-memory/memory-tencentdb
+```
+
+该 npm 包含真正的 `TdaiGateway`（SQLite + sqlite-vec + LLM pipeline）。插件本身只是一层薄壳，提供 hook、skill 和 sessionKey 等绑定逻辑，不携带任何重型依赖。
+
 ### Claude Code
 
 ```bash
@@ -33,7 +43,7 @@ codex plugin marketplace add <marketplace-url>
 
 ---
 
-不需要改 `~/.claude/settings.json` 或 `~/.codex/config.toml`。第一次启动 session 时，插件会在 8421–8430 端口拉起一个本地 daemon（即现有的 TDAI Gateway），并生成随机 Bearer token。状态保存在 `${CLAUDE_PLUGIN_DATA}`。
+不需要改 `~/.claude/settings.json` 或 `~/.codex/config.toml`。第一次启动 session 时，插件通过 `npx tdai-memory-gateway` 在 8421–8430 端口拉起 daemon，并生成随机 Bearer token。状态保存在 `${CLAUDE_PLUGIN_DATA}`。
 
 ## 配置
 
@@ -43,7 +53,7 @@ codex plugin marketplace add <marketplace-url>
 |---|---|---|
 | `TDAI_SESSION_KEY` | `hash(cwd)` | 覆盖项目级记忆分区 |
 | `TDAI_GATEWAY_TOKEN` | 自动生成 | daemon ↔ hook IPC 的 Bearer token |
-| `TDAI_GATEWAY_ENTRY` | 自动解析 | Gateway 入口脚本路径 |
+| `TDAI_GATEWAY_COMMAND` | `npx` | 覆盖 daemon 启动命令（高级用法；如 `node /path/to/cli.mjs` 用于本地开发） |
 
 大多数用户都不需要设置任何变量。`TDAI_SESSION_KEY=shared-with-other-project` 是最常用的高级用法。
 

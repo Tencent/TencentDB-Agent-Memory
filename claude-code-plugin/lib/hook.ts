@@ -170,16 +170,10 @@ async function main(): Promise<void> {
     let state = await readDaemonState(dataDir);
 
     if (event === "session-start" && !state) {
-      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT ?? "";
-      const gatewayEntry =
-        process.env.TDAI_GATEWAY_ENTRY ??
-        (pluginRoot ? join(pluginRoot, "dist/lib/gateway-entry.mjs") : "");
-      if (gatewayEntry) {
-        try {
-          state = await mgr.ensureRunning(process.ppid, gatewayEntry);
-        } catch (err) {
-          await safeLog(logPath, `session-start: spawn failed: ${(err as Error).message}`);
-        }
+      try {
+        state = await mgr.ensureRunning(process.ppid);
+      } catch (err) {
+        await safeLog(logPath, `session-start: spawn failed: ${(err as Error).message}`);
       }
     }
 

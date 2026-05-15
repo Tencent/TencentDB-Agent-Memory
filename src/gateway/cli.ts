@@ -1,15 +1,22 @@
+#!/usr/bin/env node
 /**
- * Gateway entry script — wraps TdaiGateway with parent-process liveness
- * binding for the Claude Code plugin daemon lifecycle.
+ * `tdai-memory-gateway` — standalone Gateway daemon entry.
  *
- * Spawned by lib/daemon.ts with env:
- *   TDAI_GATEWAY_TOKEN  — Bearer token (required by gateway middleware)
- *   TDAI_GATEWAY_PORT   — Port to bind
- *   TDAI_DATA_DIR       — Data root
- *   TDAI_CC_PID         — Parent cc process pid; we self-exit when it dies
+ * Exposed as a `bin` in package.json so users can run:
+ *   npx tdai-memory-gateway           # from a project that depends on the package
+ *   tdai-memory-gateway               # after `npm install -g @tencentdb-agent-memory/memory-tencentdb`
+ *
+ * Reads config from environment variables (see src/gateway/config.ts):
+ *   TDAI_GATEWAY_TOKEN  Bearer token required by clients
+ *   TDAI_GATEWAY_PORT   port to bind (default 8420)
+ *   TDAI_DATA_DIR       data root
+ *   TDAI_CC_PID         (optional) parent process pid; daemon self-exits when it dies
+ *
+ * Designed for use by host-agnostic plugins (Claude Code, Codex CLI) that spawn
+ * the Gateway as a sidecar without bundling npm dependencies.
  */
 
-import { TdaiGateway } from "../../src/gateway/server.js";
+import { TdaiGateway } from "./server.js";
 
 async function main(): Promise<void> {
   const gateway = new TdaiGateway();
@@ -25,7 +32,7 @@ async function main(): Promise<void> {
         new Promise<void>((r) => setTimeout(r, 5_000)),
       ]);
     } catch {
-      // ignore — best effort
+      // best effort
     }
     process.exit(reason === "error" ? 1 : 0);
   };
@@ -51,6 +58,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`gateway-entry failed: ${String(err)}\n`);
+  process.stderr.write(`tdai-memory-gateway failed: ${String(err)}\n`);
   process.exit(1);
 });
