@@ -53,6 +53,14 @@ function getMessageRoleLocal(msg: any): string | undefined {
   return msg.role;
 }
 
+function setMessageContentLocal(msg: any, newContent: any[]): void {
+  if (msg.type === "message") {
+    msg.message.content = newContent;
+  } else {
+    msg.content = newContent;
+  }
+}
+
 function collectHeartbeatToolUseIds(msg: any): string[] {
   const role = getMessageRoleLocal(msg);
   if (role !== "assistant") return [];
@@ -71,27 +79,37 @@ export function filterHeartbeatMessages(messages: any[], logger: PluginLogger | 
     for (const id of collectHeartbeatToolUseIds(msg)) heartbeatIds.add(id);
   }
   if (heartbeatIds.size === 0) return 0;
+
   let removed = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
+  const kept: any[] = [];
+
+  for (const msg of messages) {
     const role = getMessageRoleLocal(msg);
+
     if (role === "toolResult" || role === "tool") {
       const tcId = msg.toolCallId ?? msg.tool_call_id ?? msg.message?.toolCallId ?? msg.message?.tool_call_id;
-      if (tcId && heartbeatIds.has(tcId)) { messages.splice(i, 1); removed++; continue; }
-    }
-    if (role === "assistant") {
-      const content = getMessageContentLocal(msg);
-      if (!Array.isArray(content)) continue;
-      const beforeLen = content.length;
-      for (let j = content.length - 1; j >= 0; j--) {
-        if (isHeartbeatToolUseBlock(content[j])) content.splice(j, 1);
-      }
-      if (content.length < beforeLen) {
+      if (tcId && heartbeatIds.has(tcId)) {
         removed++;
-        if (content.length === 0) messages.splice(i, 1);
+        continue;
+      }
+    } else if (role === "assistant") {
+      const content = getMessageContentLocal(msg);
+      if (Array.isArray(content)) {
+        const filtered = content.filter((block: any) => !isHeartbeatToolUseBlock(block));
+        if (filtered.length < content.length) {
+          removed++;
+          if (filtered.length === 0) continue;
+          setMessageContentLocal(msg, filtered);
+        }
       }
     }
+
+    kept.push(msg);
   }
+
+  messages.length = 0;
+  for (const msg of kept) messages.push(msg);
+
   return removed;
 }
 
