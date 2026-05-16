@@ -334,6 +334,35 @@ Debugging no longer means probing an opaque database — it becomes a determinis
 | Hybrid retrieval | BM25 + vector + RRF — supports both keyword and semantic recall |
 | Agent tools | `tdai_memory_search` / `tdai_conversation_search` |
 
+### Library Mode for Non-OpenClaw Hosts
+
+OpenClaw remains the default plugin entry point, but host-neutral embedders can
+use the same core without depending on OpenClaw runtime APIs:
+
+```ts
+import { TdaiCore, parseConfig } from "@tencentdb-agent-memory/memory-tencentdb/core"
+import type {
+  CompletedTurn,
+  HostAdapter,
+  LLMRunnerFactory,
+} from "@tencentdb-agent-memory/memory-tencentdb/core"
+
+const config = parseConfig({
+  capture: { enabled: true },
+  extraction: { enabled: false },
+})
+
+const core = new TdaiCore({
+  hostAdapter,
+  llmRunnerFactory,
+  config,
+})
+await core.initialize()
+```
+
+For configuration-only integrations, import the parser from
+`@tencentdb-agent-memory/memory-tencentdb/config`.
+
 ---
 
 ## Documentation

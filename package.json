@@ -4,6 +4,7 @@
   "description": "Four-layer local memory system plugin for OpenClaw — auto-captures, structures, and profiles conversational knowledge using local LLM + SQLite vector search (L0→L1→L2→L3 pipeline)",
   "type": "module",
   "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "bin": {
     "migrate-sqlite-to-tcvdb": "./bin/migrate-sqlite-to-tcvdb.mjs",
     "export-tencent-vdb": "./bin/export-tencent-vdb.mjs",
@@ -11,8 +12,19 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
       "default": "./dist/index.mjs"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.mts",
+      "import": "./dist/core/index.mjs",
+      "default": "./dist/core/index.mjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.mts",
+      "import": "./dist/config.mjs",
+      "default": "./dist/config.mjs"
     }
   },
   "scripts": {
