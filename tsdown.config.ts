@@ -11,13 +11,17 @@ function collectExternalDependencies(): string[] {
 }
 
 export default defineConfig({
-  entry: ["./index.ts"],
+  entry: {
+    index: "./index.ts",
+    "core/index": "./src/core/index.ts",
+    config: "./src/config.ts",
+  },
   outDir: "./dist",
   format: "esm",
   platform: "node",
   clean: true,
   fixedExtension: true,
-  dts: false,
+  dts: true,
   sourcemap: false,
   deps: {
     neverBundle: (id) => {

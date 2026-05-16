@@ -24,3 +24,21 @@ export type {
 // TdaiCore service facade
 export { TdaiCore } from "./tdai-core.js";
 export type { TdaiCoreOptions } from "./tdai-core.js";
+
+// Configuration parser used by host-neutral embedders.
+export { parseConfig } from "../config.js";
+export type {
+  CaptureConfig,
+  EmbeddingConfig,
+  ExtractionConfig,
+  MemoryTdaiConfig,
+  BM25Config,
+  MemoryCleanupConfig,
+  OffloadConfig,
+  PersonaConfig,
+  PipelineTriggerConfig,
+  RecallConfig,
+  ReportConfig,
+  StandaloneLLMOverrideConfig,
+  TcvdbConfig,
+} from "../config.js";
