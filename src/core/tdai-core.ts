@@ -449,7 +449,8 @@ export class TdaiCore {
     const l1LlmRunner = useStandaloneRunner
       ? runnerFactory.createRunner({ enableTools: false })
       : undefined;
-    const l2l3LlmRunner = useStandaloneRunner
+    const needsToolRunner = this.cfg.pipeline.enableL2 || this.cfg.pipeline.enableL3;
+    const l2l3LlmRunner = useStandaloneRunner && needsToolRunner
       ? runnerFactory.createRunner({ enableTools: true })
       : undefined;
 
@@ -469,32 +470,36 @@ export class TdaiCore {
     this.scheduler.setPersister(createPersister(this.dataDir, this.logger));
 
     // L2 runner
-    this.scheduler.setL2Runner(async (sessionKey: string, cursor?: string) => {
-      const l2Runner = createL2Runner({
-        pluginDataDir: this.dataDir,
-        cfg: this.cfg,
-        openclawConfig,
-        vectorStore: this.vectorStore,
-        logger: this.logger,
-        instanceId: this.instanceId,
-        llmRunner: l2l3LlmRunner,
+    if (this.cfg.pipeline.enableL2) {
+      this.scheduler.setL2Runner(async (sessionKey: string, cursor?: string) => {
+        const l2Runner = createL2Runner({
+          pluginDataDir: this.dataDir,
+          cfg: this.cfg,
+          openclawConfig,
+          vectorStore: this.vectorStore,
+          logger: this.logger,
+          instanceId: this.instanceId,
+          llmRunner: l2l3LlmRunner,
+        });
+        return l2Runner(sessionKey, cursor);
       });
-      return l2Runner(sessionKey, cursor);
-    });
+    }
 
     // L3 runner
-    this.scheduler.setL3Runner(async () => {
-      const l3Runner = createL3Runner({
-        pluginDataDir: this.dataDir,
-        cfg: this.cfg,
-        openclawConfig,
-        vectorStore: this.vectorStore,
-        logger: this.logger,
-        instanceId: this.instanceId,
-        llmRunner: l2l3LlmRunner,
+    if (this.cfg.pipeline.enableL3) {
+      this.scheduler.setL3Runner(async () => {
+        const l3Runner = createL3Runner({
+          pluginDataDir: this.dataDir,
+          cfg: this.cfg,
+          openclawConfig,
+          vectorStore: this.vectorStore,
+          logger: this.logger,
+          instanceId: this.instanceId,
+          llmRunner: l2l3LlmRunner,
+        });
+        await l3Runner();
       });
-      await l3Runner();
-    });
+    }
 
     this.logger.debug?.(`${TAG} Pipeline runners wired`);
   }

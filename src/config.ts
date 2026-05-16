@@ -62,6 +62,10 @@ export interface PipelineTriggerConfig {
   everyNConversations: number;
   /** Enable warm-up: start threshold at 1, double after each L1 (1→2→4→...→everyN) (default: true) */
   enableWarmup: boolean;
+  /** Enable L2 scene extraction scheduling after L1 completes (default: true) */
+  enableL2: boolean;
+  /** Enable L3 persona generation after L2 completes (default: true) */
+  enableL3: boolean;
   /** L1 idle timeout: trigger L1 after this many seconds of inactivity (default: 600) */
   l1IdleTimeoutSeconds: number;
   /** L2 delay after L1: wait this many seconds after L1 completes before triggering L2 (default: 90) */
@@ -477,6 +481,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     pipeline: {
       everyNConversations: num(pipelineGroup, "everyNConversations") ?? 5,
       enableWarmup: bool(pipelineGroup, "enableWarmup") ?? true,
+      enableL2: bool(pipelineGroup, "enableL2") ?? true,
+      enableL3: bool(pipelineGroup, "enableL3") ?? true,
       l1IdleTimeoutSeconds: num(pipelineGroup, "l1IdleTimeoutSeconds") ?? 600,
       l2DelayAfterL1Seconds: num(pipelineGroup, "l2DelayAfterL1Seconds") ?? 90,
       l2MinIntervalSeconds: num(pipelineGroup, "l2MinIntervalSeconds") ?? 900,

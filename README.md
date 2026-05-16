@@ -257,6 +257,8 @@ docker exec -it hermes-memory hermes
 | `recall.strategy` | `"hybrid"` | Recall strategy: `keyword` / `embedding` / `hybrid` (RRF fusion, recommended) |
 | `recall.maxResults` | `5` | Number of items returned per recall |
 | `pipeline.everyNConversations` | `5` | Trigger an L1 memory extraction every N turns |
+| `pipeline.enableL2` | `true` | Enable L2 scene extraction after L1 |
+| `pipeline.enableL3` | `true` | Enable L3 persona generation after L2 |
 | `extraction.maxMemoriesPerSession` | `20` | Max memories extracted per L1 pass |
 | `persona.triggerEveryN` | `50` | Generate the user persona every N new memories |
 | `offload.enabled` | `false` | Whether to enable short-term compression |
@@ -362,6 +364,21 @@ await core.initialize()
 
 For configuration-only integrations, import the parser from
 `@tencentdb-agent-memory/memory-tencentdb/config`.
+
+Hosts that want L1 extraction without L2 scene extraction or L3 persona
+generation can keep capture/extraction enabled and explicitly disable the
+downstream pipeline stages:
+
+```ts
+const l1OnlyConfig = parseConfig({
+  capture: { enabled: true },
+  extraction: { enabled: true },
+  pipeline: {
+    enableL2: false,
+    enableL3: false,
+  },
+})
+```
 
 ---
 

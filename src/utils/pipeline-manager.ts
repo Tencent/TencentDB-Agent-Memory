@@ -120,6 +120,12 @@ export interface PipelineConfig {
    */
   enableWarmup: boolean;
 
+  /** Enable downstream L2 scene extraction after L1 succeeds. */
+  enableL2: boolean;
+
+  /** Enable downstream L3 persona generation after L2 succeeds. */
+  enableL3: boolean;
+
   l1: {
     /** Idle timeout before triggering L1 (seconds, default: 60) */
     idleTimeoutSeconds: number;
@@ -198,6 +204,8 @@ export class MemoryPipelineManager {
   private readonly l1IdleTimeoutMs: number;
   private readonly everyNConversations: number;
   private readonly enableWarmup: boolean;
+  private readonly enableL2: boolean;
+  private readonly enableL3: boolean;
   private readonly l2DelayAfterL1Ms: number;
   private readonly l2MinIntervalMs: number;
   private readonly l2MaxIntervalMs: number;
@@ -255,6 +263,8 @@ export class MemoryPipelineManager {
     this.l1IdleTimeoutMs = config.l1.idleTimeoutSeconds * 1000;
     this.everyNConversations = config.everyNConversations;
     this.enableWarmup = config.enableWarmup;
+    this.enableL2 = config.enableL2;
+    this.enableL3 = config.enableL3;
     this.l2DelayAfterL1Ms = config.l2.delayAfterL1Seconds * 1000;
     this.l2MinIntervalMs = config.l2.minIntervalSeconds * 1000;
     this.l2MaxIntervalMs = config.l2.maxIntervalSeconds * 1000;
@@ -265,6 +275,8 @@ export class MemoryPipelineManager {
     this.logger?.debug?.(
       `${TAG} Initialized: everyNConversations=${config.everyNConversations}, ` +
       `warmup=${config.enableWarmup ? "enabled" : "disabled"}, ` +
+      `l2=${config.enableL2 ? "enabled" : "disabled"}, ` +
+      `l3=${config.enableL3 ? "enabled" : "disabled"}, ` +
       `l1IdleTimeout=${config.l1.idleTimeoutSeconds}s, ` +
       `l2DelayAfterL1=${config.l2.delayAfterL1Seconds}s, ` +
       `l2MinInterval=${config.l2.minIntervalSeconds}s, ` +
@@ -686,11 +698,11 @@ export class MemoryPipelineManager {
 
     if (!this.l1Runner) {
       this.logger?.warn(`${TAG} [${sessionKey}] No L1 runner set, skipping`);
-      state.l2_pending_l1_count = state.conversation_count;
+      state.l2_pending_l1_count = this.enableL2 ? state.conversation_count : 0;
       state.conversation_count = 0;
       this.advanceWarmupThreshold(state);
       await this.persistStates();
-      this.advanceL2Timer(sessionKey);
+      if (this.enableL2) this.advanceL2Timer(sessionKey);
       return;
     }
 
@@ -738,13 +750,13 @@ export class MemoryPipelineManager {
     // Success: reset retry count and advance state
     const timers = this.getOrCreateTimers(sessionKey);
     timers.l1RetryCount = 0;
-    state.l2_pending_l1_count = state.conversation_count;
+    state.l2_pending_l1_count = this.enableL2 ? state.conversation_count : 0;
     state.conversation_count = 0;
     this.advanceWarmupThreshold(state);
     await this.persistStates();
 
     // Advance the L2 timer (downward-only) to fire after delay, respecting minInterval
-    this.advanceL2Timer(sessionKey);
+    if (this.enableL2) this.advanceL2Timer(sessionKey);
   }
 
   // ============================
@@ -762,6 +774,7 @@ export class MemoryPipelineManager {
    */
   private advanceL2Timer(sessionKey: string): void {
     if (this.destroyed) return;
+    if (!this.enableL2) return;
 
     const timers = this.getOrCreateTimers(sessionKey);
     const now = Date.now();
@@ -796,6 +809,7 @@ export class MemoryPipelineManager {
    */
   private armL2MaxInterval(sessionKey: string): void {
     if (this.destroyed) return;
+    if (!this.enableL2) return;
 
     const timers = this.getOrCreateTimers(sessionKey);
     const fireAt = Date.now() + this.l2MaxIntervalMs;
@@ -819,6 +833,8 @@ export class MemoryPipelineManager {
    * - "max-interval": periodic timer — apply cold check normally.
    */
   private onL2TimerFired(sessionKey: string, source: "delay-after-l1" | "max-interval"): void {
+    if (!this.enableL2) return;
+
     const state = this.sessionStates.get(sessionKey);
     if (!state) return;
 
@@ -844,6 +860,8 @@ export class MemoryPipelineManager {
   // ============================
 
   private enqueueL2(sessionKey: string, trigger: string): void {
+    if (!this.enableL2) return;
+
     const timers = this.getOrCreateTimers(sessionKey);
 
     // Cancel any pending L2 timer (we're about to run L2)
@@ -919,7 +937,7 @@ export class MemoryPipelineManager {
     this.armL2MaxInterval(sessionKey);
 
     // Trigger L3
-    this.triggerL3();
+    if (this.enableL3) this.triggerL3();
   }
 
   // ============================
@@ -928,6 +946,7 @@ export class MemoryPipelineManager {
 
   private triggerL3(): void {
     if (this.destroyed) return;
+    if (!this.enableL3) return;
 
     if (this.l3Running) {
       // L3 is in progress — mark pending so it runs again after current finishes
@@ -1096,6 +1115,8 @@ export class MemoryPipelineManager {
    * because the pipeline may be starting during management commands.
    */
   private recoverPendingSessions(): void {
+    if (!this.enableL2) return;
+
     for (const [sessionKey, state] of this.sessionStates) {
       if (state.conversation_count === 0 && state.l2_pending_l1_count === 0) continue;
 

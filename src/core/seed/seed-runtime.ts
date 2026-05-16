@@ -91,7 +91,9 @@ async function createSeedPipeline(opts: SeedRuntimeOptions): Promise<{ pipeline:
       logger,
     });
     l1LlmRunner = runnerFactory.createRunner({ enableTools: false });
-    l2l3LlmRunner = runnerFactory.createRunner({ enableTools: true });
+    if (cfg.pipeline.enableL2 || cfg.pipeline.enableL3) {
+      l2l3LlmRunner = runnerFactory.createRunner({ enableTools: true });
+    }
     logger.info(`${TAG} Seed using standalone LLM: model=${cfg.llm.model}`);
   }
 
@@ -105,24 +107,28 @@ async function createSeedPipeline(opts: SeedRuntimeOptions): Promise<{ pipeline:
   });
 
   // Wire L2 runner via shared factory (same logic as index.ts live runtime)
-  pipeline.scheduler.setL2Runner(createL2Runner({
-    pluginDataDir: outputDir,
-    cfg,
-    openclawConfig,
-    vectorStore: pipeline.vectorStore,
-    logger,
-    llmRunner: l2l3LlmRunner,
-  }));
+  if (cfg.pipeline.enableL2) {
+    pipeline.scheduler.setL2Runner(createL2Runner({
+      pluginDataDir: outputDir,
+      cfg,
+      openclawConfig,
+      vectorStore: pipeline.vectorStore,
+      logger,
+      llmRunner: l2l3LlmRunner,
+    }));
+  }
 
   // Wire L3 runner via shared factory (same logic as index.ts live runtime)
-  pipeline.scheduler.setL3Runner(createL3Runner({
-    pluginDataDir: outputDir,
-    cfg,
-    openclawConfig,
-    vectorStore: pipeline.vectorStore,
-    logger,
-    llmRunner: l2l3LlmRunner,
-  }));
+  if (cfg.pipeline.enableL3) {
+    pipeline.scheduler.setL3Runner(createL3Runner({
+      pluginDataDir: outputDir,
+      cfg,
+      openclawConfig,
+      vectorStore: pipeline.vectorStore,
+      logger,
+      llmRunner: l2l3LlmRunner,
+    }));
+  }
 
   return { pipeline, cfg };
 }
