@@ -380,6 +380,17 @@ const l1OnlyConfig = parseConfig({
 })
 ```
 
+When a host stores memories for multiple agents or workspaces in one backend,
+pass `sessionKey` or `sessionId` to `searchMemories()` to keep L1 recall scoped:
+
+```ts
+await core.searchMemories({
+  query: "review style",
+  sessionKey: "workspace:/repo/refresh",
+  limit: 5,
+})
+```
+
 ---
 
 ## Documentation

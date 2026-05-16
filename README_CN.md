@@ -385,6 +385,17 @@ const l1OnlyConfig = parseConfig({
 })
 ```
 
+如果宿主把多个 agent 或 workspace 的记忆放在同一个后端里，调用
+`searchMemories()` 时传入 `sessionKey` 或 `sessionId`，让 L1 召回保持作用域隔离：
+
+```ts
+await core.searchMemories({
+  query: "review style",
+  sessionKey: "workspace:/repo/refresh",
+  limit: 5,
+})
+```
+
 ---
 
 ## 文档
