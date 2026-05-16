@@ -243,6 +243,95 @@ docker exec -it hermes-memory hermes
 
 ---
 
+### 3. Importing historical conversations (seed)
+
+Starting from v0.1.4, TencentDB Agent Memory ships with a `seed` command that processes historical conversations through the full L0→L1→L2→L3 pipeline, so previously exchanged conversations can produce structured memories, scene blocks, and persona refinements just like new ones.
+
+#### When to use seed
+
+- You installed the plugin after days of usage and want it to learn from past context.
+- You are migrating from another memory system.
+- You want to backfill selected high-value conversations.
+
+#### Input format
+
+Seed accepts two formats:
+
+**Format A (preferred):**
+```json
+{
+  "sessions": [
+    {
+      "sessionKey": "my-agent-session",
+      "conversations": [
+        [
+          { "role": "user", "content": "What's our project status?", "timestamp": 1770000000000 },
+          { "role": "assistant", "content": "We shipped v2.1 yesterday.", "timestamp": 1770000001000 }
+        ],
+        [
+          { "role": "user", "content": "Let's review the Q4 plan." },
+          { "role": "assistant", "content": "Here's the roadmap…" }
+        ]
+      ]
+    }
+  ]
+}
+```
+
+**Format B (top-level array):**
+```json
+[
+  {
+    "sessionKey": "my-agent-session",
+    "conversations": [ … ]
+  }
+]
+```
+
+Each `conversations` entry is a **round** — an ordered array of `{"role", "content"}` objects (typically a user turn followed by an assistant reply). Timestamps are optional; missing values are auto-filled on seed.
+
+#### CLI usage
+
+```bash
+# Standalone / Hermes mode
+openclaw memory-tdai seed --input ./conversations.json
+
+# With options
+openclaw memory-tdai seed \
+  --input ./conversations.json \
+  --config ./seed-config.json \
+  --yes
+```
+
+Options:
+
+| Flag | Description |
+| :--- | :--- |
+| `--input <file>` | Path to JSON file (Required) |
+| `--output-dir <dir>` | Seed output directory (auto-generated if omitted) |
+| `--session-key <key>` | Fallback session key when input lacks one |
+| `--config <file>` | Plugin config override file (JSON, deep-merged) |
+| `--strict-round-role` | Require both user and assistant per round |
+| `--yes` | Skip interactive confirmations |
+
+#### What happens during seed
+
+1. Each session's conversations are captured as L0 raw records (same path as real-time capture).
+2. The L1 memory extractor processes each session — the same LLM extraction pipeline that runs on new conversations.
+3. If configured, L2 scene blocks and L3 persona refinements are generated as new memories accumulate.
+4. All data is written to the same `vectors.db`, `records/`, `scene_blocks/` storage — no separate migration step needed.
+
+> 💡 When running seed in standalone mode, point `--output-dir` at your existing plugin data directory to write directly into the active memory store.
+
+#### Best practices
+
+- **Don't seed everything.** Only import conversations that contain decisions, preferences, project context, or instructive exchanges. Cron logs and debugging noise degrade extraction quality.
+- **Use a focused time window first.** Try the last 7–14 days before backfilling months of history.
+- **Monitor L1 output.** Check `~/.openclaw/memory-tdai/records/` and the l1_records SQLite table to assess extraction quality.
+- **Extraction requires a capable LLM.** If you experience `NO_JSON` or empty extractions, enable the standalone LLM (`plugin.config.llm`) with a model that handles structured JSON output well (e.g., DeepSeek V4 Pro, GPT-5.5).
+
+---
+
 
 ## 🔧 Configurable Parameters
 

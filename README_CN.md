@@ -250,6 +250,72 @@ docker exec -it hermes-memory hermes
 
 ---
 
+### 3. 历史对话导入（seed）
+
+从 v0.1.4 开始，TencentDB Agent Memory 内置了 `seed` 命令，可以将历史对话数据送入完整的 L0→L1→L2→L3 管线处理，让之前的对话也能产生结构化记忆、场景块和用户画像。
+
+#### 适用场景
+
+- 插件安装较晚，希望它学习安装前的对话上下文。
+- 从其他记忆系统迁移。
+- 希望精选导入高价值历史对话。
+
+#### 输入格式
+
+支持两种格式：
+
+**Format A（推荐）：**
+```json
+{
+  "sessions": [
+    {
+      "sessionKey": "my-agent-session",
+      "conversations": [
+        [
+          { "role": "user", "content": "项目进度怎么样了？", "timestamp": 1770000000000 },
+          { "role": "assistant", "content": "v2.1 昨天上线了。", "timestamp": 1770000001000 }
+        ]
+      ]
+    }
+  ]
+}
+```
+
+**Format B（顶层数组）：**
+```json
+[
+  {
+    "sessionKey": "my-agent-session",
+    "conversations": [ … ]
+  }
+]
+```
+
+#### CLI 用法
+
+```bash
+openclaw memory-tdai seed --input ./conversations.json
+openclaw memory-tdai seed --input ./conversations.json --config ./seed-config.json --yes
+```
+
+参数说明：`--input`（必填）、`--output-dir`、`--session-key`、`--config`、`--strict-round-role`、`--yes`。
+
+#### Seed 过程
+
+1. 每个会话的对话被记录为 L0 原始记录（与实时捕获路径一致）。
+2. L1 提取器对每个会话进行处理——与新对话运行相同的 LLM 抽取管线。
+3. 所有数据写入同一个 `vectors.db`、`records/`、`scene_blocks/`——无需迁移步骤。
+
+> 💡 将 `--output-dir` 指向已有插件数据目录，直接写入活跃记忆存储。
+
+#### 最佳实践
+
+- **不要全部导入。** 只导入包含决策、偏好、项目上下文的对话。Cron 日志和调试流水会降低抽取质量。
+- **先从短时间窗口开始。** 试最近 7-14 天再决定是否回溯更多。
+- **抽取需要强 LLM。** 遇到 `NO_JSON` 时启用独立 LLM（`plugin.config.llm`），选择能稳定输出 JSON 的模型。
+
+---
+
 ## 🔧 可调参数
 
 **所有字段均有合理默认值，零配置即可跑。** 如果要调优，可以按使用深度逐层展开。
