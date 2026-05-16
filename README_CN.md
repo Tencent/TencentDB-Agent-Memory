@@ -263,6 +263,8 @@ docker exec -it hermes-memory hermes
 | `recall.strategy` | `"hybrid"` | 召回策略：`keyword` / `embedding` / `hybrid`（RRF 融合，推荐） |
 | `recall.maxResults` | `5` | 每次召回条数 |
 | `pipeline.everyNConversations` | `5` | 每 N 轮对话触发一次 L1 记忆提取 |
+| `pipeline.enableL2` | `true` | L1 后是否启用 L2 场景提取 |
+| `pipeline.enableL3` | `true` | L2 后是否启用 L3 画像生成 |
 | `extraction.maxMemoriesPerSession` | `20` | 单次 L1 最多提取多少条 |
 | `persona.triggerEveryN` | `50` | 每 N 条新记忆触发用户画像生成 |
 | `offload.enabled` | `false` | 是否启用短期记忆压缩 |
