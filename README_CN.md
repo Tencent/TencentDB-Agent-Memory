@@ -53,12 +53,13 @@
 TencentDB Agent Memory 帮助 Agent 学会你的流程、保留任务上下文、复用历史经验。但我们**拒绝暴力的历史堆砌**，也**抛弃不可逆的暴力摘要**。我们将记忆设计为一套极具层次感的系统，以**符号化记忆**解决单次长任务的信息过载，以**记忆分层**解决跨会话的经验沉淀。
 
 > **让 Agent 记住该记的，让人把注意力留给判断、创造和真正有价值的工作。**
-
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/7382b50e-f98c-4643-bf68-0015859575d0" width="200" alt="Agent Memory 微信社群二维码" />
+  <img src="https://github.com/user-attachments/assets/a43322e4-d2e1-4be7-a94d-0e9748e1131b" width="360" alt="Agent Memory 微信社群二维码" />
   <br/>
   <sub>📱 扫码加入 <b>Agent Memory 微信社群</b>，与早期开发者直接对话</sub>
 </p>
+
+
 
 
 
@@ -359,6 +360,7 @@ docker exec -it hermes-memory hermes
 - 🛠️ **想贡献代码？** 请先阅读 [CONTRIBUTING.md](./CONTRIBUTING_CN.md)。
 - 💬 **想加入交流群？** 扫码加入 **Agent Memory 微信社群**，与早期开发者直接对话。
  <p align="center"><img src="https://github.com/user-attachments/assets/7382b50e-f98c-4643-bf68-0015859575d0" width="200" alt="Agent Memory 微信社群二维码" />
+ 
 
 ---
 
