@@ -664,6 +664,8 @@ export function createPipelineManager(
     {
       everyNConversations: cfg.pipeline.everyNConversations,
       enableWarmup: cfg.pipeline.enableWarmup,
+      enableL2: cfg.pipeline.enableL2,
+      enableL3: cfg.pipeline.enableL3,
       l1: { idleTimeoutSeconds: cfg.pipeline.l1IdleTimeoutSeconds },
       l2: {
         delayAfterL1Seconds: cfg.pipeline.l2DelayAfterL1Seconds,
