@@ -25,7 +25,9 @@
 #
 #   以 root 身份执行（镜像构建场景）：
 #     bash ~/install_memory_tencentdb.sh
-#     # root 会自动 su 切换到目标用户执行，完成后修复权限
+#     # 默认按 root 的 Hermes 环境安装；若要安装到指定用户：
+#     MEMORY_TENCENTDB_USER=<username> bash ~/install_memory_tencentdb.sh
+#     # 指定用户时会自动 su 切换执行，完成后修复权限
 #
 # 前置条件：
 #   - install_hermes_ubuntu.sh 已执行完成（hermes-agent 已安装）
@@ -33,16 +35,17 @@
 
 set -e
 
-# 动态获取当前执行用户及 HOME 目录
-USERNAME=$(whoami)
+# 动态获取目标安装用户及 HOME 目录
+CURRENT_USER=$(whoami)
+USERNAME="${MEMORY_TENCENTDB_USER:-${SUDO_USER:-$CURRENT_USER}}"
 USER_HOME=$(eval echo ~$USERNAME)
 
 # npm 包名
 NPM_PACKAGE="@tencentdb-agent-memory/memory-tencentdb@latest"
 
 # Hermes 路径
-HERMES_HOME="$USER_HOME/.hermes"
-HERMES_AGENT_DIR="$HERMES_HOME/hermes-agent"
+HERMES_HOME="${HERMES_HOME:-$USER_HOME/.hermes}"
+HERMES_AGENT_DIR="${HERMES_AGENT_DIR:-}"
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
 
 # memory-tencentdb 统一根目录（所有 tdai 相关数据/代码都收纳在此）
@@ -61,11 +64,51 @@ TDAI_DATA_DIR="${TDAI_DATA_DIR:-$MEMORY_TENCENTDB_ROOT/memory-tdai}"
 LEGACY_INSTALL_DIR="$USER_HOME/tdai-memory-openclaw-plugin"
 LEGACY_DATA_DIR="$USER_HOME/memory-tdai"
 
-# ==================== root → 自动切换到目标用户 ====================
-# 与 install_hermes_ubuntu.sh 保持一致：如果以 root 执行，自动 su 切到
-# 目标用户运行实际安装逻辑。也可以直接以目标用户身份执行，跳过此段。
+shell_quote() {
+    printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
 
-if [ "$(id -u)" -eq 0 ]; then
+resolve_hermes_agent_dir() {
+    if [ -n "$HERMES_AGENT_DIR" ]; then
+        echo "$HERMES_AGENT_DIR"
+        return 0
+    fi
+
+    # Legacy/non-root Hermes installs keep code under $HERMES_HOME.
+    if [ -d "$HERMES_HOME/hermes-agent" ]; then
+        echo "$HERMES_HOME/hermes-agent"
+        return 0
+    fi
+
+    # Hermes root installs on Linux now use an FHS layout by default.
+    # Data still lives in $HERMES_HOME, but code is under /usr/local/lib.
+    if [ -d "/usr/local/lib/hermes-agent" ]; then
+        echo "/usr/local/lib/hermes-agent"
+        return 0
+    fi
+
+    # Fall back to the historical path so the error message stays actionable.
+    echo "$HERMES_HOME/hermes-agent"
+}
+
+write_privileged_file() {
+    local file="$1"
+    if [ "$(id -u)" -eq 0 ]; then
+        tee "$file"
+    else
+        sudo tee "$file"
+    fi
+}
+
+HERMES_AGENT_DIR="$(resolve_hermes_agent_dir)"
+
+# ==================== root → 自动切换到目标用户 ====================
+# 与 install_hermes_ubuntu.sh 保持一致：如果以 root 执行且目标用户不是
+# root，自动 su 切到目标用户运行实际安装逻辑。也可以直接以目标用户身份
+# 执行，跳过此段。目标用户可通过 MEMORY_TENCENTDB_USER 覆盖；sudo 场景
+# 默认使用 SUDO_USER。
+
+if [ "$(id -u)" -eq 0 ] && [ "$USERNAME" != "root" ]; then
     echo "[memory-tencentdb] Running as root, switching to $USERNAME for installation..."
 
     # 验证前置条件
@@ -225,14 +268,23 @@ fi
 echo "[memory-tencentdb] Step 4: Setting up Gateway environment..."
 
 # 构建 Gateway 启动命令
-# 使用 sh -c 包裹，先 cd 到插件目录再启动 Gateway（ESM 解析需要）
-GATEWAY_CMD="sh -c 'cd $TDAI_INSTALL_DIR && exec npx tsx src/gateway/server.ts'"
+# 使用 sh -c 包裹，先 cd 到插件目录再启动 Gateway（ESM 解析需要）。
+# Prefer the absolute node binary found during installation. This avoids
+# systemd/nvm PATH drift where `npx` exists in interactive shells but later
+# fails with `/usr/bin/env: node: No such file or directory`.
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+if [ -n "$NODE_BIN" ]; then
+    GATEWAY_INNER="cd $(shell_quote "$TDAI_INSTALL_DIR") && exec $(shell_quote "$NODE_BIN") --import tsx/esm src/gateway/server.ts"
+else
+    GATEWAY_INNER="cd $(shell_quote "$TDAI_INSTALL_DIR") && exec npx tsx src/gateway/server.ts"
+fi
+GATEWAY_CMD="sh -c $(shell_quote "$GATEWAY_INNER")"
 
 # ── 4a: /etc/profile.d（SSH 交互式登录场景） ──
 # 写入 /etc/profile.d 持久化环境变量，供 SSH 手动执行 `hermes` 时使用。
 # 注意：LLM 相关变量（API key、model 等）需要用户后续手动配置
 ENVFILE="/etc/profile.d/memory-tencentdb-env.sh"
-cat << ENVEOF | sudo tee "$ENVFILE" > /dev/null
+cat << ENVEOF | write_privileged_file "$ENVFILE" > /dev/null
 # memory-tencentdb Gateway 环境变量
 export MEMORY_TENCENTDB_GATEWAY_CMD="$GATEWAY_CMD"
 export MEMORY_TENCENTDB_GATEWAY_HOST="127.0.0.1"
