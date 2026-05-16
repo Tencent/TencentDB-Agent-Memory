@@ -352,7 +352,6 @@ import { TdaiCore, parseConfig } from "@tencentdb-agent-memory/memory-tencentdb/
 import type {
   CompletedTurn,
   HostAdapter,
-  LLMRunnerFactory,
 } from "@tencentdb-agent-memory/memory-tencentdb/core"
 
 const config = parseConfig({
@@ -362,11 +361,13 @@ const config = parseConfig({
 
 const core = new TdaiCore({
   hostAdapter,
-  llmRunnerFactory,
   config,
 })
 await core.initialize()
 ```
+
+`TdaiCore` 通过 `HostAdapter.getLLMRunnerFactory()` 获取模型执行器，
+所以构造函数只需要 adapter 和解析后的 config。
 
 如果只需要配置解析，可以从
 `@tencentdb-agent-memory/memory-tencentdb/config` 导入 `parseConfig`。

@@ -8,7 +8,8 @@
 
 ### ✨ 改进
 
-- **Library mode L1 作用域过滤**：`searchMemories()` 支持 `sessionKey` / `sessionId`，Gateway `/search/memories` 支持 `session_key` / `session_id`，避免共享后端里的结构化记忆跨 session 召回。
+- **Library mode L1 作用域过滤**：`searchMemories()` 支持 `sessionKey` / `sessionId`，Gateway `/search/memories` 支持 `session_key` / `session_id`，并把作用域下推到 SQLite / TCVDB store 查询阶段，避免共享后端里的结构化记忆跨 session 召回或被 topK 截断漏召回。
+- **Library mode 文档示例**：README 示例改为通过 `HostAdapter.getLLMRunnerFactory()` 提供模型执行器，避免展示 `TdaiCore` 不支持的构造参数。
 
 ---
 

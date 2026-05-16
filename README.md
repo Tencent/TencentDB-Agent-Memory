@@ -346,7 +346,6 @@ import { TdaiCore, parseConfig } from "@tencentdb-agent-memory/memory-tencentdb/
 import type {
   CompletedTurn,
   HostAdapter,
-  LLMRunnerFactory,
 } from "@tencentdb-agent-memory/memory-tencentdb/core"
 
 const config = parseConfig({
@@ -356,11 +355,14 @@ const config = parseConfig({
 
 const core = new TdaiCore({
   hostAdapter,
-  llmRunnerFactory,
   config,
 })
 await core.initialize()
 ```
+
+`TdaiCore` obtains model execution through
+`HostAdapter.getLLMRunnerFactory()`, so the constructor only needs the adapter
+and parsed config.
 
 For configuration-only integrations, import the parser from
 `@tencentdb-agent-memory/memory-tencentdb/config`.

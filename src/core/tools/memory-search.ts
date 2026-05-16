@@ -10,7 +10,7 @@
  * The tool is registered via `api.registerTool()` in index.ts.
  */
 
-import type { IMemoryStore, L1SearchResult } from "../store/types.js";
+import type { IMemoryStore, L1QueryFilter, L1SearchResult } from "../store/types.js";
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService } from "../store/embedding.js";
 
@@ -54,6 +54,16 @@ function matchesL1Scope(
   if (sessionKey && item.session_key !== sessionKey) return false;
   if (sessionId && item.session_id !== sessionId) return false;
   return true;
+}
+
+function buildL1ScopeFilter(params: {
+  sessionKey?: string;
+  sessionId?: string;
+}): L1QueryFilter | undefined {
+  const filter: L1QueryFilter = {};
+  if (params.sessionKey) filter.sessionKey = params.sessionKey;
+  if (params.sessionId) filter.sessionId = params.sessionId;
+  return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
 // ============================
@@ -139,6 +149,7 @@ export async function executeMemorySearch(params: {
   // ── Determine available capabilities ──
   const hasEmbedding = !!embeddingService;
   const hasFts = vectorStore.isFtsAvailable();
+  const scopeFilter = buildL1ScopeFilter({ sessionKey, sessionId });
 
   if (!hasEmbedding && !hasFts) {
     logger?.warn?.(`${TAG} Neither EmbeddingService nor FTS5 available — cannot search`);
@@ -168,7 +179,7 @@ export async function executeMemorySearch(params: {
           return [];
         }
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 query: "${ftsQuery}"`);
-        const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+        const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK, scopeFilter);
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 returned ${ftsResults.length} candidates`);
         return ftsResults.filter((r) => matchesL1Scope(r, sessionKey, sessionId)).map((r) => ({
           id: r.record_id,
@@ -197,7 +208,12 @@ export async function executeMemorySearch(params: {
         logger?.debug?.(
           `${TAG} [hybrid-vec] Embedding OK, dims=${queryEmbedding.length}, searching top-${candidateK}...`,
         );
-        const vecResults: L1SearchResult[] = await vectorStore.searchL1Vector(queryEmbedding, candidateK, query);
+        const vecResults: L1SearchResult[] = await vectorStore.searchL1Vector(
+          queryEmbedding,
+          candidateK,
+          query,
+          scopeFilter,
+        );
         logger?.debug?.(`${TAG} [hybrid-vec] Vector search returned ${vecResults.length} candidates`);
         return vecResults.filter((r) => matchesL1Scope(r, sessionKey, sessionId)).map((r) => ({
           id: r.record_id,
