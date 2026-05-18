@@ -25,12 +25,14 @@ const TAG = "[memory-tdai] [seed-cmd]";
 export function registerSeedCommand(parent: Command, ctx: SeedCliContext): void {
   parent
     .command("seed")
-    .description("Seed historical conversation data into the memory pipeline (L0 → L1)")
+    .description("Seed historical conversation data into the memory pipeline (L0 → L1, optionally L2/L3)")
     .requiredOption("--input <file>", "Path to input JSON file")
     .option("--output-dir <dir>", "Output directory for pipeline data (default: auto-generated)")
     .option("--session-key <key>", "Fallback session key when input lacks one")
     .option("--config <file>", "Path to memory-tdai config override file (JSON, deep-merged on top of current plugin config)")
     .option("--strict-round-role", "Require each round to have both user and assistant messages", false)
+    .option("--wait-for-full-pipeline", "Wait for final L1→L2→L3 processing before returning", false)
+    .option("--full-pipeline-timeout-ms <ms>", "Max wait time for final L1→L2→L3 processing", "900000")
     .option("--yes", "Skip interactive confirmations (e.g. timestamp auto-fill)", false)
     .addHelpText("after", `
 Examples:
@@ -47,6 +49,8 @@ Examples:
         strictRoundRole: rawOpts.strictRoundRole === true,
         yes: rawOpts.yes === true,
         configFile: rawOpts.config as string | undefined,
+        waitForFullPipeline: rawOpts.waitForFullPipeline === true,
+        fullPipelineTimeoutMs: Number(rawOpts.fullPipelineTimeoutMs) || undefined,
       };
 
       await runSeedCommand(opts, ctx);
@@ -66,6 +70,7 @@ async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Pr
   logger.info(`${TAG}   sessionKey: ${opts.sessionKey ?? "(from input)"}`);
   logger.info(`${TAG}   config:     ${opts.configFile ?? "(default)"}`);
   logger.info(`${TAG}   strict:     ${opts.strictRoundRole}`);
+  logger.info(`${TAG}   full:       ${opts.waitForFullPipeline === true}`);
   logger.info(`${TAG}   yes:        ${opts.yes}`);
 
   // 0. Load config override file and deep-merge with base plugin config
@@ -149,6 +154,8 @@ async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Pr
     openclawConfig: ctx.config,
     pluginConfig: mergedPluginConfig,
     inputFile: opts.input,
+    waitForFullPipeline: opts.waitForFullPipeline === true,
+    fullPipelineFlushTimeoutMs: opts.fullPipelineTimeoutMs,
     logger,
     onProgress: (progress) => {
       const pct = ((progress.currentRound / progress.totalRounds) * 100).toFixed(0);
@@ -168,6 +175,7 @@ async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Pr
   console.log(`║  Rounds:      ${String(summary.roundsProcessed).padStart(11)}               ║`);
   console.log(`║  Messages:    ${String(summary.messagesProcessed).padStart(11)}               ║`);
   console.log(`║  L0 recorded: ${String(summary.l0RecordedCount).padStart(11)}               ║`);
+  console.log(`║  Full flush:  ${String(summary.fullPipelineFlushed ? "yes" : "no").padStart(11)}               ║`);
   console.log(`║  Duration:    ${(summary.durationMs / 1000).toFixed(1).padStart(10)}s               ║`);
   console.log("╚══════════════════════════════════════════╝");
   console.log(`\n📁 Output: ${summary.outputDir}\n`);

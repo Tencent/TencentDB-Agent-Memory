@@ -5,15 +5,14 @@
  * L1 runner, L2 runner, L3 runner, and persister wiring — keeping this
  * module focused on seed-specific concerns:
  * - Synchronous per-round L0 capture with progress reporting
- * - waitForL1Idle polling (L1 only — see FIXME below)
+ * - waitForL1Idle polling at batch boundaries
+ * - Optional final full-pipeline flush for callers that need L2/L3 artifacts
  * - Ctrl+C graceful shutdown
  *
- * FIXME: Currently we only wait for L1 to become idle before destroying the
- * pipeline.  L2 (scene extraction) and L3 (persona generation) may still be
- * in-flight when `pipeline.destroy()` is called.  This is intentional for now
- * to avoid excessively long seed runs, but means seed output may not include
- * the latest L2/L3 artifacts.  Re-evaluate adding a full L1+L2+L3 idle wait
- * once pipeline-manager exposes reliable L2/L3 idle signals.
+ * By default, seed preserves the historical CLI behavior and waits for L1 at
+ * batch boundaries. Callers such as the Codex history importer can opt into a
+ * final L1→L2→L3 flush before shutdown when they need higher-level artifacts
+ * to be immediately available for recall injection.
  */
 
 import path from "node:path";
@@ -47,6 +46,10 @@ export interface SeedRuntimeOptions {
   pluginConfig?: Record<string, unknown>;
   /** Original input file path (for manifest traceability). */
   inputFile?: string;
+  /** Wait for a final L1→L2→L3 flush before returning. */
+  waitForFullPipeline?: boolean;
+  /** Max time for the final L1→L2→L3 flush. */
+  fullPipelineFlushTimeoutMs?: number;
   /** Logger instance. */
   logger: PipelineLogger;
   /** Progress callback (called after each round). */
@@ -202,9 +205,9 @@ async function waitForL1Idle(
 /**
  * Execute the seed pipeline: feed normalized input through L0 → L1.
  *
- * L2/L3 runners are wired but their completion is **not** awaited — see the
- * module-level FIXME.  The pipeline is destroyed after L1 idle, so L2/L3 may
- * be interrupted mid-run.
+ * L2/L3 runners are wired. Their completion is awaited only when
+ * `waitForFullPipeline` is true; otherwise seed preserves the faster historical
+ * behavior and returns after L1 drains.
  *
  * This is the core runtime called by `src/cli/commands/seed.ts` after
  * all input validation and user confirmation are complete.
@@ -232,6 +235,7 @@ export async function executeSeed(
   let pipeline: PipelineInstance | undefined;
   let totalL0Recorded = 0;
   let roundsProcessed = 0;
+  let fullPipelineFlushed = false;
 
   try {
     // Create and start pipeline (returns both the pipeline instance and the
@@ -364,6 +368,25 @@ export async function executeSeed(
         { pollIntervalMs: 1_000, stableRounds: 3, maxWaitMs: 300_000 },
       );
     }
+
+    if (!interrupted && opts.waitForFullPipeline) {
+      onProgress?.({
+        currentRound: roundsProcessed,
+        totalRounds: input.totalRounds,
+        sessionKey: "*",
+        stage: "l1_l2_l3_flushing",
+      });
+
+      logger.info(`${TAG} Final full pipeline flush requested (L1→L2→L3)...`);
+      await pipeline.scheduler.flushPendingWork({
+        reason: "seed",
+        timeoutMs: opts.fullPipelineFlushTimeoutMs ?? 900_000,
+        pollIntervalMs: 100,
+        stableRounds: 3,
+        armFollowUpL2Timers: false,
+      });
+      fullPipelineFlushed = true;
+    }
   } finally {
     process.removeListener("SIGINT", onSigint);
 
@@ -384,6 +407,7 @@ export async function executeSeed(
     roundsProcessed,
     messagesProcessed: input.totalMessages,
     l0RecordedCount: totalL0Recorded,
+    fullPipelineFlushed,
     durationMs,
     outputDir: opts.outputDir,
   };
@@ -407,6 +431,7 @@ export async function executeSeed(
         sessions: summary.sessionsProcessed,
         rounds: summary.roundsProcessed,
         messages: summary.messagesProcessed,
+        fullPipelineFlushed: summary.fullPipelineFlushed,
         startedAt: new Date(startTime).toISOString(),
         completedAt: new Date().toISOString(),
       };

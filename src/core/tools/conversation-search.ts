@@ -46,6 +46,8 @@ export interface ConversationSearchResult {
 }
 
 const TAG = "[memory-tdai][tdai_conversation_search]";
+const FILTERED_SEARCH_INITIAL_CANDIDATES = 50;
+const FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES = 500;
 
 // ============================
 // RRF (Reciprocal Rank Fusion)
@@ -90,6 +92,7 @@ export async function executeConversationSearch(params: {
   query: string;
   limit: number;
   sessionKey?: string;
+  sessionKeyPrefixes?: string[];
   vectorStore?: IMemoryStore;
   embeddingService?: EmbeddingService;
   logger?: Logger;
@@ -98,14 +101,17 @@ export async function executeConversationSearch(params: {
     query,
     limit,
     sessionKey: sessionFilter,
+    sessionKeyPrefixes,
     vectorStore,
     embeddingService,
     logger,
   } = params;
+  const normalizedSessionPrefixes = normalizeSessionPrefixes(sessionKeyPrefixes);
 
   logger?.debug?.(
     `${TAG} CALLED: query="${query.slice(0, 100)}", limit=${limit}, ` +
     `sessionFilter=${sessionFilter ?? "(none)"}, ` +
+    `sessionPrefixFilter=${normalizedSessionPrefixes.join("|") || "(none)"}, ` +
     `vectorStore=${vectorStore ? "available" : "UNAVAILABLE"}, ` +
     `embeddingService=${embeddingService ? "available" : "UNAVAILABLE"}`,
   );
@@ -137,12 +143,96 @@ export async function executeConversationSearch(params: {
     };
   }
 
-  // ── Over-retrieve for later filtering and RRF merging ──
-  const candidateK = sessionFilter ? limit * 4 : limit * 3;
+  const hasSessionScope = !!sessionFilter || normalizedSessionPrefixes.length > 0;
+  let candidateK = hasSessionScope
+    ? Math.max(limit * 6, FILTERED_SEARCH_INITIAL_CANDIDATES)
+    : limit * 3;
+  const maxCandidateK = hasSessionScope
+    ? await scopedSearchMaxCandidates({
+        count: () => vectorStore.countL0(),
+        candidateK,
+        logger,
+      })
+    : candidateK;
 
-  // ── Run available search strategies in parallel ──
+  while (true) {
+    const search = await collectConversationCandidates({
+      query,
+      candidateK,
+      hasFts,
+      hasEmbedding,
+      vectorStore,
+      embeddingService,
+      logger,
+    });
+
+    if (search.results.length === 0) {
+      logger?.debug?.(`${TAG} Both search paths returned 0 results`);
+      return { results: [], total: 0, strategy: hasEmbedding ? "embedding" : "fts" };
+    }
+
+    const filtered = filterConversationResults(search.results, {
+      sessionFilter,
+      sessionPrefixes: normalizedSessionPrefixes,
+      logger,
+    });
+    const trimmed = filtered.slice(0, limit);
+
+    if (
+      trimmed.length >= limit ||
+      !hasSessionScope ||
+      !search.mayHaveMore ||
+      candidateK >= maxCandidateK
+    ) {
+      logger?.debug?.(
+        `${TAG} RESULT (strategy=${search.strategy}, candidateK=${candidateK}): returning ${trimmed.length} messages ` +
+        `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
+      );
+
+      return {
+        results: trimmed,
+        total: trimmed.length,
+        strategy: search.strategy,
+      };
+    }
+
+    candidateK = Math.min(candidateK * 2, maxCandidateK);
+    logger?.debug?.(`${TAG} Expanding scoped search window to candidateK=${candidateK}`);
+  }
+}
+
+async function scopedSearchMaxCandidates(params: {
+  count: () => number | Promise<number>;
+  candidateK: number;
+  logger?: Logger;
+}): Promise<number> {
+  const { count, candidateK, logger } = params;
+  try {
+    const total = await count();
+    if (Number.isFinite(total) && total > 0) {
+      return Math.max(candidateK, Math.floor(total));
+    }
+  } catch (err) {
+    logger?.warn?.(
+      `${TAG} Scoped search could not count records; falling back to ${FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES} candidates: ` +
+      `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return Math.max(candidateK, FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES);
+}
+
+async function collectConversationCandidates(params: {
+  query: string;
+  candidateK: number;
+  hasFts: boolean;
+  hasEmbedding: boolean;
+  vectorStore: IMemoryStore;
+  embeddingService?: EmbeddingService;
+  logger?: Logger;
+}): Promise<{ results: ConversationSearchResultItem[]; strategy: string; mayHaveMore: boolean }> {
+  const { query, candidateK, hasFts, hasEmbedding, vectorStore, embeddingService, logger } = params;
+
   const [ftsItems, vecItems] = await Promise.all([
-    // FTS5 keyword search on L0
     (async (): Promise<ConversationSearchResultItem[]> => {
       if (!hasFts) return [];
       try {
@@ -154,14 +244,7 @@ export async function executeConversationSearch(params: {
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 query: "${ftsQuery}"`);
         const ftsResults = await vectorStore.searchL0Fts(ftsQuery, candidateK);
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 returned ${ftsResults.length} candidates`);
-        return ftsResults.map((r) => ({
-          id: r.record_id,
-          session_key: r.session_key,
-          role: r.role,
-          content: r.message_text,
-          score: r.score,
-          recorded_at: r.recorded_at,
-        }));
+        return ftsResults.map(conversationResultItemFromStore);
       } catch (err) {
         logger?.warn?.(
           `${TAG} [hybrid-fts] FTS5 search failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
@@ -169,8 +252,6 @@ export async function executeConversationSearch(params: {
         return [];
       }
     })(),
-
-    // Vector embedding search on L0
     (async (): Promise<ConversationSearchResultItem[]> => {
       if (!hasEmbedding) return [];
       try {
@@ -181,14 +262,7 @@ export async function executeConversationSearch(params: {
         );
         const vecResults: L0SearchResult[] = await vectorStore.searchL0Vector(queryEmbedding, candidateK, query);
         logger?.debug?.(`${TAG} [hybrid-vec] Vector search returned ${vecResults.length} candidates`);
-        return vecResults.map((r) => ({
-          id: r.record_id,
-          session_key: r.session_key,
-          role: r.role,
-          content: r.message_text,
-          score: r.score,
-          recorded_at: r.recorded_at,
-        }));
+        return vecResults.map(conversationResultItemFromStore);
       } catch (err) {
         logger?.warn?.(
           `${TAG} [hybrid-vec] Embedding search failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
@@ -198,54 +272,68 @@ export async function executeConversationSearch(params: {
     })(),
   ]);
 
-  // ── Determine effective strategy ──
   const ftsOk = ftsItems.length > 0;
   const vecOk = vecItems.length > 0;
-  let strategy: string;
+  const strategy = ftsOk && vecOk ? "hybrid" : vecOk ? "embedding" : ftsOk ? "fts" : "none";
+  const results = strategy === "hybrid"
+    ? rrfMergeL0(ftsItems, vecItems)
+    : ftsOk ? ftsItems : vecItems;
 
-  if (ftsOk && vecOk) {
-    strategy = "hybrid";
-  } else if (vecOk) {
-    strategy = "embedding";
-  } else if (ftsOk) {
-    strategy = "fts";
-  } else {
-    logger?.debug?.(`${TAG} Both search paths returned 0 results`);
-    return { results: [], total: 0, strategy: hasEmbedding ? "embedding" : "fts" };
-  }
-
-  // ── Merge results ──
-  let results: ConversationSearchResultItem[];
   if (strategy === "hybrid") {
-    results = rrfMergeL0(ftsItems, vecItems);
     logger?.debug?.(
       `${TAG} [hybrid] RRF merged: fts=${ftsItems.length}, vec=${vecItems.length} → ${results.length} unique`,
     );
-  } else {
-    // Single-source: use whichever list has results (already sorted by score)
-    results = ftsOk ? ftsItems : vecItems;
   }
-
-  // ── Apply session key filter ──
-  if (sessionFilter) {
-    const preFilterCount = results.length;
-    results = results.filter((r) => r.session_key === sessionFilter);
-    logger?.debug?.(`${TAG} After session filter "${sessionFilter}": ${results.length}/${preFilterCount}`);
-  }
-
-  // ── Trim to requested limit ──
-  const trimmed = results.slice(0, limit);
-
-  logger?.debug?.(
-    `${TAG} RESULT (strategy=${strategy}): returning ${trimmed.length} messages ` +
-    `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
-  );
 
   return {
-    results: trimmed,
-    total: trimmed.length,
+    results,
     strategy,
+    mayHaveMore: (hasFts && ftsItems.length >= candidateK) || (hasEmbedding && vecItems.length >= candidateK),
   };
+}
+
+function conversationResultItemFromStore(r: L0SearchResult): ConversationSearchResultItem {
+  return {
+    id: r.record_id,
+    session_key: r.session_key,
+    role: r.role,
+    content: r.message_text,
+    score: r.score,
+    recorded_at: r.recorded_at,
+  };
+}
+
+function filterConversationResults(
+  results: ConversationSearchResultItem[],
+  filters: {
+    sessionFilter?: string;
+    sessionPrefixes: string[];
+    logger?: Logger;
+  },
+): ConversationSearchResultItem[] {
+  const { sessionFilter, sessionPrefixes, logger } = filters;
+  let filtered = results;
+  if (sessionFilter) {
+    const preFilterCount = filtered.length;
+    filtered = filtered.filter((r) => r.session_key === sessionFilter);
+    logger?.debug?.(`${TAG} After session filter "${sessionFilter}": ${filtered.length}/${preFilterCount}`);
+  }
+  if (sessionPrefixes.length > 0) {
+    const preFilterCount = filtered.length;
+    filtered = filtered.filter((r) =>
+      sessionPrefixes.some((prefix) => r.session_key.startsWith(prefix)),
+    );
+    logger?.debug?.(`${TAG} After session-prefix filter: ${filtered.length}/${preFilterCount}`);
+  }
+  return filtered;
+}
+
+function normalizeSessionPrefixes(prefixes: string[] | undefined): string[] {
+  if (!Array.isArray(prefixes)) return [];
+  return prefixes
+    .map((prefix) => typeof prefix === "string" ? prefix.trim() : "")
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 // ============================

@@ -2,18 +2,21 @@
  * TDAI Gateway — HTTP server for the Hermes sidecar.
  *
  * Exposes TDAI Core capabilities as HTTP endpoints:
+ *   GET  /                    — Service metadata for browser/local preview probes
  *   GET  /health              — Health check
  *   POST /recall              — Memory recall (prefetch)
  *   POST /capture             — Conversation capture (sync_turn)
  *   POST /search/memories     — L1 memory search
  *   POST /search/conversations — L0 conversation search
  *   POST /session/end         — Session end + flush
- *   POST /seed               — Batch seed historical conversations (L0 → L1)
+ *   POST /seed               — Batch seed historical conversations (L0 → L1, optionally L2/L3)
  *
  * Built with Node.js native `http` module — no Express/Fastify dependency.
  * Designed to run as a managed sidecar alongside Hermes.
  */
 
+import crypto from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
 import { URL } from "node:url";
 import { TdaiCore } from "../core/tdai-core.js";
@@ -23,6 +26,7 @@ import type { GatewayConfig } from "./config.js";
 import { initDataDirectories } from "../utils/pipeline-factory.js";
 import { SessionFilter } from "../utils/session-filter.js";
 import type {
+  RootResponse,
   HealthResponse,
   RecallRequest,
   RecallResponse,
@@ -173,10 +177,7 @@ export class TdaiGateway {
     const method = req.method?.toUpperCase() ?? "GET";
     const pathname = url.pathname;
 
-    // CORS headers (for development)
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (!this.applyCors(req, res)) return;
 
     if (method === "OPTIONS") {
       res.writeHead(204);
@@ -184,8 +185,12 @@ export class TdaiGateway {
       return;
     }
 
+    if (!this.authorizeRequest(req, res, method)) return;
+
     try {
       switch (`${method} ${pathname}`) {
+        case "GET /":
+          return this.handleRoot(res);
         case "GET /health":
           return this.handleHealth(res);
         case "POST /recall":
@@ -213,6 +218,73 @@ export class TdaiGateway {
   // ============================
   // Route handlers
   // ============================
+
+  private applyCors(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    const origin = String(req.headers.origin ?? "");
+    if (!origin) return true;
+    if (!isAllowedCorsOrigin(origin)) {
+      sendError(res, 403, "CORS origin not allowed");
+      return false;
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    return true;
+  }
+
+  private authorizeRequest(req: http.IncomingMessage, res: http.ServerResponse, method: string): boolean {
+    const token = expectedGatewayToken();
+
+    if (!token) {
+      if (!isLoopbackHost(this.config.server.host)) {
+        sendError(res, 401, "Unauthorized: Gateway token is required for non-loopback routes");
+        return false;
+      }
+
+      if (method === "GET") {
+        return true;
+      }
+
+      if (process.env.TDAI_GATEWAY_AUTH_DISABLED === "true") {
+        return true;
+      }
+
+      res.setHeader("WWW-Authenticate", 'Bearer realm="tdai-gateway"');
+      sendError(res, 401, "Unauthorized: Gateway token is required for POST routes; set TDAI_GATEWAY_AUTH_DISABLED=true only for trusted loopback development");
+      return false;
+    }
+
+    const authorization = String(req.headers.authorization ?? "");
+    const match = authorization.match(/^Bearer\s+(\S+)\s*$/i);
+    if (!match || !safeTokenEqual(match[1], token)) {
+      res.setHeader("WWW-Authenticate", 'Bearer realm="tdai-gateway"');
+      sendError(res, 401, "Unauthorized");
+      return false;
+    }
+    return true;
+  }
+
+  private handleRoot(res: http.ServerResponse): void {
+    const response: RootResponse = {
+      service: "TencentDB Agent Memory Gateway",
+      kind: "api",
+      version: VERSION,
+      message: "This local service is an API sidecar, not a web UI. Use GET /health for readiness.",
+      endpoints: [
+        { method: "GET", path: "/health", description: "Gateway readiness and store status" },
+        { method: "POST", path: "/recall", description: "Memory recall for a session query" },
+        { method: "POST", path: "/capture", description: "Conversation turn capture" },
+        { method: "POST", path: "/search/memories", description: "Structured memory search" },
+        { method: "POST", path: "/search/conversations", description: "Raw conversation search" },
+        { method: "POST", path: "/session/end", description: "Session flush" },
+        { method: "POST", path: "/seed", description: "Batch seed historical conversations" },
+      ],
+    };
+    sendJson(res, 200, response);
+  }
 
   private handleHealth(res: http.ServerResponse): void {
     const response: HealthResponse = {
@@ -267,6 +339,7 @@ export class TdaiGateway {
       ],
       sessionKey: body.session_key,
       sessionId: body.session_id,
+      startedAt: typeof body.started_at === "number" ? body.started_at : undefined,
     });
     const elapsed = Date.now() - startMs;
 
@@ -292,6 +365,7 @@ export class TdaiGateway {
       limit: body.limit,
       type: body.type,
       scene: body.scene,
+      sessionKeyPrefixes: body.session_key_prefixes,
     });
 
     const response: MemorySearchResponse = {
@@ -314,6 +388,7 @@ export class TdaiGateway {
       query: body.query,
       limit: body.limit,
       sessionKey: body.session_key,
+      sessionKeyPrefixes: body.session_key_prefixes,
     });
 
     const response: ConversationSearchResponse = {
@@ -366,7 +441,8 @@ export class TdaiGateway {
 
     this.logger.info(
       `Seed request: ${input.sessions.length} session(s), ` +
-      `${input.totalRounds} round(s), ${input.totalMessages} message(s)`,
+      `${input.totalRounds} round(s), ${input.totalMessages} message(s), ` +
+      `waitFullPipeline=${body.wait_for_full_pipeline === true}`,
     );
 
     // Resolve output directory: use gateway's data dir with a timestamped subfolder
@@ -392,6 +468,15 @@ export class TdaiGateway {
       },
     };
     if (body.config_override) {
+      const blockedOverridePaths = findBlockedConfigOverridePaths(body.config_override);
+      if (blockedOverridePaths.length > 0) {
+        sendJson(res, 400, {
+          error: "config_override contains blocked credential-bearing or network-routing keys",
+          blocked_paths: blockedOverridePaths,
+        });
+        return;
+      }
+
       for (const key of Object.keys(body.config_override)) {
         const baseVal = pluginConfig[key];
         const overVal = body.config_override[key];
@@ -409,6 +494,10 @@ export class TdaiGateway {
       outputDir,
       openclawConfig: {},
       pluginConfig,
+      waitForFullPipeline: body.wait_for_full_pipeline === true,
+      fullPipelineFlushTimeoutMs: typeof body.full_pipeline_timeout_ms === "number"
+        ? body.full_pipeline_timeout_ms
+        : undefined,
       logger: this.logger as import("../utils/pipeline-factory.js").PipelineLogger,
       onProgress: (progress: SeedProgress) => {
         this.logger.debug?.(
@@ -428,11 +517,85 @@ export class TdaiGateway {
       rounds_processed: summary.roundsProcessed,
       messages_processed: summary.messagesProcessed,
       l0_recorded: summary.l0RecordedCount,
+      full_pipeline_flushed: summary.fullPipelineFlushed,
       duration_ms: summary.durationMs,
       output_dir: summary.outputDir,
     };
     sendJson(res, 200, response);
   }
+}
+
+function expectedGatewayToken(): string {
+  const direct = process.env.TDAI_GATEWAY_TOKEN?.trim();
+  if (direct) return direct;
+
+  const tokenPath = process.env.TDAI_TOKEN_PATH?.trim();
+  if (!tokenPath) return "";
+  try {
+    const stat = fs.statSync(tokenPath);
+    if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) return "\0";
+    if (process.platform !== "win32" && typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+      return "\0";
+    }
+    return fs.readFileSync(tokenPath, "utf-8").trim() || "\0";
+  } catch {
+    return "\0";
+  }
+}
+
+function isAllowedCorsOrigin(origin: string): boolean {
+  const explicit = process.env.TDAI_GATEWAY_CORS_ORIGINS?.trim();
+  if (explicit) {
+    const allowed = explicit.split(",").map((item) => item.trim()).filter(Boolean);
+    if (allowed.includes("*")) return true;
+    return allowed.includes(origin);
+  }
+
+  try {
+    const url = new URL(origin);
+    return isLoopbackHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = String(host || "").trim().toLowerCase();
+  return normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]";
+}
+
+function findBlockedConfigOverridePaths(value: unknown, prefix = ""): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const blocked: string[] = [];
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const current = prefix ? `${prefix}.${key}` : key;
+    if (isBlockedConfigOverridePath(current)) {
+      blocked.push(current);
+      continue;
+    }
+    blocked.push(...findBlockedConfigOverridePaths(child, current));
+  }
+  return blocked;
+}
+
+function isBlockedConfigOverridePath(path: string): boolean {
+  const parts = path.toLowerCase().split(".");
+  const leaf = parts.at(-1) || "";
+  if (parts[0] === "tcvdb") return true;
+  if (parts[0] === "embedding") return true;
+  if (parts[0] === "llm" && ["apikey", "baseurl", "enabled"].includes(leaf)) return true;
+  if (parts[0] === "offload" && ["backendurl", "backendapikey", "mode"].includes(leaf)) return true;
+  return /(?:apikey|secret|token|password|authorization|credential|baseurl|backendurl|proxyurl)$/.test(leaf);
+}
+
+function safeTokenEqual(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length) return false;
+  return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
 // ============================
