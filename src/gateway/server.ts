@@ -15,6 +15,7 @@
  */
 
 import http from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { URL } from "node:url";
 import { TdaiCore } from "../core/tdai-core.js";
 import { StandaloneHostAdapter } from "../adapters/standalone/host-adapter.js";
@@ -176,13 +177,15 @@ export class TdaiGateway {
     // CORS headers (for development)
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
     if (method === "OPTIONS") {
       res.writeHead(204);
       res.end();
       return;
     }
+
+    if (!this.authorize(req, res)) return;
 
     try {
       switch (`${method} ${pathname}`) {
@@ -208,6 +211,35 @@ export class TdaiGateway {
       this.logger.error(`Request error [${method} ${pathname}]: ${msg}`);
       sendError(res, 500, msg);
     }
+  }
+
+  /**
+   * Optional Bearer-token gate. When TDAI_GATEWAY_TOKEN (or a token file
+   * pointed to by TDAI_TOKEN_PATH, loaded by cli.ts into process.env) is set,
+   * every non-OPTIONS request must carry a matching `Authorization: Bearer
+   * <token>` header. Comparison is timing-safe and case-insensitive on the
+   * "Bearer" scheme keyword per RFC 6750 §2.1.
+   *
+   * Returns true if the request is authorized, false if a 401 has been sent.
+   */
+  private authorize(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+    const expectedToken = process.env.TDAI_GATEWAY_TOKEN;
+    if (!expectedToken) return true;
+
+    const authHeader = req.headers.authorization ?? "";
+    const match = /^Bearer\s+(\S+)\s*$/i.exec(authHeader);
+    const provided = match?.[1] ?? "";
+    const expectedBuf = Buffer.from(expectedToken, "utf-8");
+    const providedBuf = Buffer.from(provided, "utf-8");
+    const ok =
+      expectedBuf.length > 0 &&
+      providedBuf.length === expectedBuf.length &&
+      timingSafeEqual(providedBuf, expectedBuf);
+    if (ok) return true;
+
+    res.setHeader("WWW-Authenticate", 'Bearer realm="tdai-gateway"');
+    sendError(res, 401, "Unauthorized");
+    return false;
   }
 
   // ============================

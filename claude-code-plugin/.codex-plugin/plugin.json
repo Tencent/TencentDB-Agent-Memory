@@ -1,0 +1,41 @@
+{
+  "name": "tdai-memory",
+  "version": "0.1.0",
+  "description": "Long-term + symbolic short-term memory for AI coding agents, powered by TencentDB Agent Memory.",
+  "author": {
+    "name": "李冠辰",
+    "email": "liguanchen@xiaomi.com"
+  },
+  "homepage": "https://github.com/Tencent/TencentDB-Agent-Memory",
+  "repository": "https://github.com/Tencent/TencentDB-Agent-Memory",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "long-term-memory",
+    "short-term-memory",
+    "ai-memory",
+    "vector-search",
+    "sqlite-vec",
+    "persona",
+    "scene-extraction"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "TDAI Memory",
+    "shortDescription": "Long-term + short-term memory for AI coding agents",
+    "longDescription": "Adds long-term memory and symbolic short-term memory to Codex CLI: automatic recall before every prompt (relevant past memories injected via additionalContext), automatic capture after every turn (L0 conversation written, L1/L2/L3 atoms/scenarios/persona extracted in the background), and manual control via skills (memory-search, memory-status, memory-clear-session). Memory is partitioned per project (hash of cwd) by default. The daemon runs locally on 127.0.0.1 with a Bearer-token-protected HTTP API (file mode 0600).",
+    "developerName": "TencentDB Agent Memory contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "brandColor": "#3B82F6",
+    "defaultPrompt": [
+      "Do you remember what we discussed about this project?",
+      "Search my memory for the migration plan we made last week",
+      "What were my preferences for the API design?"
+    ]
+  }
+}
