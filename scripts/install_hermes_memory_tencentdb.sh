@@ -224,9 +224,34 @@ fi
 
 echo "[memory-tencentdb] Step 4: Setting up Gateway environment..."
 
+# 解析 node 绝对路径写入 GATEWAY_CMD。
+#
+# 为什么不直接用 `npx tsx ...` 这种依赖 PATH 的形式？
+#
+# 当 Hermes（或独立的 memory-tencentdb-gateway 服务）以 systemd service
+# 运行时，systemd 不会 source 任何 user shell rc 文件 —— nvm / asdf 用户
+# 装的 node 在 `~/.nvm/versions/node/v*/bin/`，而 systemd unit 默认 PATH
+# 只有 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`。
+# 结果：交互 shell 里 `npx tsx ...` 能跑，systemd 服务里 fork-exec 就 fail
+# 在 `/usr/bin/env: 'node': No such file or directory`。详见 issue #19。
+#
+# 修复：在生成 GATEWAY_CMD 的当下解析 `node` 的绝对路径，并改用 Node 原生
+# 的 `--import tsx/esm` 形式（Node ≥ 20.6 起 stable）跳过 `npx`，让最终
+# 命令完全不依赖运行时 PATH。
+NODE_BIN="$(command -v node || true)"
+if [ -z "$NODE_BIN" ]; then
+    echo "[ERROR] 'node' not found in PATH; cannot generate Gateway start command." >&2
+    echo "[ERROR] If you installed Node via nvm/asdf, source the loader script for the install user before re-running:" >&2
+    echo "[ERROR]   source ~/.bashrc   # or `nvm use <version>`" >&2
+    exit 1
+fi
+echo "[memory-tencentdb] Resolved node: $NODE_BIN"
+
 # 构建 Gateway 启动命令
-# 使用 sh -c 包裹，先 cd 到插件目录再启动 Gateway（ESM 解析需要）
-GATEWAY_CMD="sh -c 'cd $TDAI_INSTALL_DIR && exec npx tsx src/gateway/server.ts'"
+# 使用 sh -c 包裹，先 cd 到插件目录再启动 Gateway（ESM 解析需要）。
+# `node --import tsx/esm` 替代 `npx tsx`：避免 systemd 环境下 PATH 不含
+# nvm bin 导致 `npx` 找不到 node 的问题（issue #19）。
+GATEWAY_CMD="sh -c 'cd $TDAI_INSTALL_DIR && exec \"$NODE_BIN\" --import tsx/esm src/gateway/server.ts'"
 
 # ── 4a: /etc/profile.d（SSH 交互式登录场景） ──
 # 写入 /etc/profile.d 持久化环境变量，供 SSH 手动执行 `hermes` 时使用。
