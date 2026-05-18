@@ -33,8 +33,17 @@
 
 set -e
 
-# 动态获取当前执行用户及 HOME 目录
-USERNAME=$(whoami)
+# 动态获取目标安装用户及其 HOME 目录。
+# 优先级：
+#   1. 显式 ``INSTALL_AS_USER`` 环境变量（管理员脚本场景：root 跑安装但
+#      想为另一个用户配置）
+#   2. ``SUDO_USER``（被 ``sudo`` 调用时，切回原用户而不是 root）
+#   3. ``whoami`` —— 当前 EUID 对应的用户
+#
+# 注意：当 root 直接 ssh 登录跑（非 sudo）时，前两个都不会被设置，
+# ``whoami`` 返回 ``root``。下面的 ``id -u`` == 0 分支会识别这种"目标
+# 就是 root"的情况、跳过 ``su - root`` 递归。
+USERNAME="${INSTALL_AS_USER:-${SUDO_USER:-$(whoami)}}"
 USER_HOME=$(eval echo ~$USERNAME)
 
 # npm 包名
@@ -62,10 +71,14 @@ LEGACY_INSTALL_DIR="$USER_HOME/tdai-memory-openclaw-plugin"
 LEGACY_DATA_DIR="$USER_HOME/memory-tdai"
 
 # ==================== root → 自动切换到目标用户 ====================
-# 与 install_hermes_ubuntu.sh 保持一致：如果以 root 执行，自动 su 切到
-# 目标用户运行实际安装逻辑。也可以直接以目标用户身份执行，跳过此段。
+# 与 install_hermes_ubuntu.sh 保持一致：如果以 root 执行且目标用户不是
+# root，自动 su 切到目标用户运行实际安装逻辑。
+#
+# 如果当前是 root 且目标用户也是 root（``USERNAME=root``，例如直接 ssh
+# 登录 root 跑安装），跳过 ``su - root`` —— 否则会无限递归（``su - root``
+# 进入的仍是 root，又走到这个分支，再次 su，永远停不下来）。见 issue #20。
 
-if [ "$(id -u)" -eq 0 ]; then
+if [ "$(id -u)" -eq 0 ] && [ "$USERNAME" != "root" ]; then
     echo "[memory-tencentdb] Running as root, switching to $USERNAME for installation..."
 
     # 验证前置条件
@@ -88,6 +101,10 @@ if [ "$(id -u)" -eq 0 ]; then
     rm -f "$TEMP_SCRIPT"
     echo "[memory-tencentdb] Installation completed successfully"
     exit 0
+elif [ "$(id -u)" -eq 0 ]; then
+    # 当前是 root 且目标用户也是 root：直接以 root 跑后续安装逻辑，
+    # 不再走 ``su -`` 切换（避免 #20 的递归）。
+    echo "[memory-tencentdb] Running as root; target user is also root — installing in place."
 fi
 
 # ==================== 用户阶段（核心安装逻辑） ====================
