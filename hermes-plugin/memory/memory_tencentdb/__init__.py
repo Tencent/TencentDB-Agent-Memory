@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 
+from ._identity import resolve_user_id
 from .client import MemoryTencentdbSdkClient
 from .supervisor import GatewaySupervisor
 
@@ -702,7 +703,7 @@ class MemoryTencentdbProvider(MemoryProvider):
             Gateway is ready.
         """
         self._session_id = session_id
-        self._user_id = kwargs.get("user_id", "default")
+        self._user_id = resolve_user_id(kwargs)
 
         host = _resolve_gateway_host()
         port = _resolve_gateway_port()
