@@ -12,6 +12,7 @@ import type { OffloadEntry, ToolPair, TaskJudgment, PluginLogger } from "./types
 import { traceOffloadModelIo } from "./opik-tracer.js";
 import * as https from "node:https";
 import * as http from "node:http";
+import * as fs from "node:fs";
 
 // ─── Request / Response Types ────────────────────────────────────────────────
 
@@ -114,6 +115,18 @@ export class BackendClient {
   private userIdFn: () => string | null;
   /** Resolves the value of the `X-Task-Id` header sent on every call (optional). */
   private taskIdFn: () => string | null;
+  /**
+   * TLS options for HTTPS requests, resolved once at construction. Defaults
+   * are *secure* (full chain validation against the system trust store).
+   * Two env-driven overrides:
+   *   - `TDAI_OFFLOAD_INSECURE_TLS=1`     → set `rejectUnauthorized: false`
+   *     (development / private self-signed backends only; a warning is logged
+   *     on construction so the operator notices it in stderr).
+   *   - `TDAI_OFFLOAD_CA_PEM_PATH=<path>` → load a custom CA certificate so
+   *     a self-signed backend can be trusted *without* disabling validation.
+   *     Mirrors the `caPemPath` option on `src/core/store/tcvdb-client.ts`.
+   */
+  private tlsOptions: { rejectUnauthorized?: boolean; ca?: Buffer };
 
   constructor(
     baseUrl: string,
@@ -130,6 +143,34 @@ export class BackendClient {
     this.sessionKeyFn = sessionKeyFn ?? (() => null);
     this.userIdFn = userIdFn ?? (() => null);
     this.taskIdFn = taskIdFn ?? (() => null);
+    this.tlsOptions = this.resolveTlsOptions();
+  }
+
+  private resolveTlsOptions(): { rejectUnauthorized?: boolean; ca?: Buffer } {
+    const opts: { rejectUnauthorized?: boolean; ca?: Buffer } = {};
+    if (process.env.TDAI_OFFLOAD_INSECURE_TLS === "1") {
+      opts.rejectUnauthorized = false;
+      this.logger.warn(
+        `[context-offload] TDAI_OFFLOAD_INSECURE_TLS=1: TLS certificate validation is DISABLED. ` +
+          `This is only safe for development against private/self-signed backends — never use in production. ` +
+          `Prefer TDAI_OFFLOAD_CA_PEM_PATH=<path-to-ca.pem> to trust a specific self-signed CA instead.`,
+      );
+    }
+    const caPath = process.env.TDAI_OFFLOAD_CA_PEM_PATH;
+    if (caPath) {
+      try {
+        opts.ca = fs.readFileSync(caPath);
+        this.logger.info(
+          `[context-offload] loaded CA certificate from TDAI_OFFLOAD_CA_PEM_PATH=${caPath}`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[context-offload] failed to load CA from TDAI_OFFLOAD_CA_PEM_PATH=${caPath}: ` +
+            `${err instanceof Error ? err.message : String(err)}. Falling back to system trust store.`,
+        );
+      }
+    }
+    return opts;
   }
 
   /** L1 Summarize — synchronous await (used by assemble flush + force trigger) */
@@ -309,7 +350,7 @@ export class BackendClient {
           path: parsed.pathname + parsed.search,
           method: "POST",
           headers: reqHeaders,
-          ...(isHttps ? { rejectUnauthorized: false } : {}),
+          ...(isHttps ? this.tlsOptions : {}),
         },
         (res) => {
           let data = "";
