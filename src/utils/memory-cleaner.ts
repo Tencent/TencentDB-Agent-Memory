@@ -3,13 +3,7 @@ import path from "node:path";
 
 import type { IMemoryStore } from "../core/store/types.js";
 import { ManagedTimer } from "./managed-timer.js";
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
-}
+import type { Logger } from "../core/types.js";
 
 export interface MemoryCleanerOptions {
   baseDir: string;

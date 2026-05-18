@@ -27,16 +27,11 @@ import { parseSceneBlock } from "../scene/scene-format.js";
 import { generateSceneNavigation, stripSceneNavigation } from "../scene/scene-navigation.js";
 import { buildSceneExtractionPrompt } from "../prompts/scene-extraction.js";
 import { report } from "../report/reporter.js";
-import type { LLMRunner } from "../types.js";
+import type { LLMRunner, Logger } from "../types.js";
 
 const TAG = "[memory-tdai] [extractor]";
 
-interface ExtractorLogger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
-}
+type ExtractorLogger = Logger;
 
 export interface ExtractionResult {
   memoriesProcessed: number;

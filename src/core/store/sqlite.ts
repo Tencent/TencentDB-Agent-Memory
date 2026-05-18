@@ -33,6 +33,7 @@ import type {
   L0SearchResult,
   L0FtsResult,
 } from "./types.js";
+import type { Logger } from "../types.js";
 
 // ============================
 // Types
@@ -104,13 +105,6 @@ export interface L1QueryFilter {
   sessionId?: string;
   /** If provided, only return records with updated_time strictly after this ISO 8601 UTC timestamp. */
   updatedAfter?: string;
-}
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
 }
 
 const TAG = "[memory-tdai][sqlite]";

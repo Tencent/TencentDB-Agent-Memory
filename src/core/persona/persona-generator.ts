@@ -13,16 +13,9 @@ import { buildPersonaPrompt } from "../prompts/persona-generation.js";
 import { BackupManager } from "../../utils/backup.js";
 import { escapeXmlTags } from "../../utils/sanitize.js";
 import { report } from "../report/reporter.js";
-import type { LLMRunner } from "../types.js";
+import type { LLMRunner, Logger } from "../types.js";
 
 const TAG = "[memory-tdai] [persona]";
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
-}
 
 export class PersonaGenerator {
   private dataDir: string;

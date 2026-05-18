@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { getEnv } from "./env.js";
 import { report } from "../core/report/reporter.js";
+import type { Logger } from "../core/types.js";
 
 /**
  * Resolve a preferred temporary directory for memory-tdai operations.
@@ -49,12 +50,7 @@ function resolveOpenClawTmpDir(): string {
 
 const TAG = "[memory-tdai] [runner]";
 
-interface RunnerLogger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
-}
+type RunnerLogger = Logger;
 
 // Dynamic import type — runEmbeddedPiAgent is an internal API
 // Prefer the public plugin runtime signature so host-injected runtimes stay assignable.

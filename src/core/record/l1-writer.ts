@@ -21,6 +21,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type { IMemoryStore } from "../store/types.js";
 import type { EmbeddingService } from "../store/embedding.js";
+import type { Logger } from "../types.js";
 
 // ============================
 // Types
@@ -108,13 +109,6 @@ export interface DedupDecision {
   merged_priority?: number;
   /** Union of all related timestamps (for update/merge) */
   merged_timestamps?: string[];
-}
-
-interface Logger {
-  debug?: (message: string) => void;
-  info: (message: string) => void;
-  warn: (message: string) => void;
-  error: (message: string) => void;
 }
 
 const TAG = "[memory-tdai][l1-writer]";
