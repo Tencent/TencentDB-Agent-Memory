@@ -111,6 +111,10 @@ export interface SeedCommandOptions {
   yes: boolean;
   /** Path to memory-tdai config override file (JSON, deep-merged on top of current plugin config). */
   configFile?: string;
+  /** Wait for final L1→L2→L3 processing before returning. */
+  waitForFullPipeline?: boolean;
+  /** Max wait time for final L1→L2→L3 processing. */
+  fullPipelineTimeoutMs?: number;
 }
 
 // ============================
@@ -135,6 +139,8 @@ export interface SeedSummary {
   roundsProcessed: number;
   messagesProcessed: number;
   l0RecordedCount: number;
+  /** True when the caller requested and completed a final L1→L2→L3 flush. */
+  fullPipelineFlushed?: boolean;
   durationMs: number;
   outputDir: string;
 }
