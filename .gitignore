@@ -41,3 +41,12 @@ test-offload-sessions.sh
 # npm pack / release tarballs (never commit packaged outputs)
 *.tgz
 *.tar.gz
+
+# Local development notes (contributor-only, not shipped)
+docs/superpowers/
+
+# Per-developer Claude Code project instructions (contributor-only)
+CLAUDE.md
+
+# Plugin build output
+claude-code-plugin/dist/
