@@ -151,10 +151,21 @@ export interface SeedRequest {
   strict_round_role?: boolean;
   /** Auto-fill missing timestamps (default: true). */
   auto_fill_timestamps?: boolean;
+  /** Wait for L1 extraction to drain before returning (default: true). */
+  wait_for_l1?: boolean;
+  /** Bounded L1 extraction concurrency for this seed run. */
+  l1_concurrency?: number;
+  /** Coalesce pending L2 records into batches during final full-pipeline flush. */
+  l2_batch_size?: number;
   /** Wait for final L1→L2→L3 processing before returning (default: false). */
   wait_for_full_pipeline?: boolean;
   /** Max wait time for final L1→L2→L3 processing. */
   full_pipeline_timeout_ms?: number;
+  /**
+   * Write seed output into the currently running memory store instead of an
+   * isolated timestamped seed directory. Intended for trusted local importers.
+   */
+  import_into_current_store?: boolean;
   /** Plugin config overrides (deep-merged on top of gateway memory config). */
   config_override?: Record<string, unknown>;
 }

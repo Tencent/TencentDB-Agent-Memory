@@ -95,9 +95,11 @@ The plugin manifest is:
 codex-plugin/.codex-plugin/plugin.json
 ```
 
-It declares the Codex skill, bundled hook config, and bundled MCP server config:
+It declares the Codex skill, bundled hook config, and bundled MCP server config.
+The adapter also ships a machine-readable reuse contract:
 
 ```text
+codex-plugin/adapter-profile.json
 codex-plugin/hooks/hooks.codex.json
 codex-plugin/.mcp.json
 ```
@@ -109,6 +111,40 @@ installed adapter path because user-level hooks do not receive plugin-specific
 environment variables. The bundled MCP config exposes memory search and offload
 lookup tools; the manual `codex mcp add` command below is a fallback for local
 development or older Codex builds.
+
+## Reuse Contract
+
+The adapter is intended to be installable from a copied plugin directory, a
+Codex plugin cache, a package release, or a forked source checkout without
+editing script files. The stable contract is:
+
+- `adapter-profile.json` describes the adapter ID, host, entrypoints,
+  runtime requirements, environment variables, and extension points.
+- Hook and MCP configs refer to the plugin root through Codex-provided root
+  variables instead of machine-specific absolute paths.
+- Per-user state lives under `TDAI_CODEX_DATA_DIR` or the default
+  `~/.memory-tencentdb/codex-memory-tdai`; copied adapters do not share state
+  unless that directory is explicitly shared.
+- Gateway autostart uses the package binary by default, so a copied adapter can
+  run without importing dependencies from the plugin directory.
+- Source-tree development is still supported by setting `TDAI_CODEX_TDAI_ROOT`
+  to a local checkout.
+- Fork, release, and tarball validation can override
+  `TDAI_CODEX_GATEWAY_PACKAGE` without changing the adapter scripts.
+
+Run the doctor before publishing, copying, or handing the adapter to another
+Codex environment:
+
+```bash
+node codex-plugin/scripts/doctor.mjs
+node codex-plugin/scripts/doctor.mjs --start --require-healthy --strict
+node codex-plugin/scripts/query.mjs doctor --json
+```
+
+The doctor checks that manifest entrypoints exist, hook/MCP configs are
+portable, adapter state is writable with private adapter-owned subdirectories,
+the Gateway URL is loopback unless explicitly allowed, and the Gateway can be
+launched from either a source checkout or package binary.
 
 ## Setup
 
@@ -264,7 +300,12 @@ the generated `/seed` payload before writing.
 By default, a real import requests `wait_for_full_pipeline`, so Gateway `/seed`
 records L0, waits for L1, flushes L2 scene extraction, and waits for L3 persona
 generation before returning. Use `--no-full-pipeline` when the faster L0/L1-only
-seed behavior is preferred.
+seed behavior is preferred. For large trusted local imports, `--l1-concurrency`
+or `TDAI_CODEX_IMPORT_L1_CONCURRENCY` can raise bounded L1 extraction
+parallelism without changing the live host default. The importer also sends
+`l2_batch_size` by default, which lets Gateway coalesce many short historical
+Codex sessions into larger L2 scene-extraction batches while keeping live
+runtime L2 scheduling unchanged.
 
 ## Short-Term Context Offload
 

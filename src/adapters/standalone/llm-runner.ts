@@ -226,12 +226,6 @@ function createSandboxedTools(workspaceDir: string, logger?: Logger) {
   };
 }
 
-/** Read-only tool subset — used when enableTools=false to avoid empty tools rejection. */
-function createReadOnlyTools(workspaceDir: string, logger?: Logger) {
-  const all = createSandboxedTools(workspaceDir, logger);
-  return { read_file: all.read_file };
-}
-
 // ============================
 // StandaloneLLMRunner
 // ============================
@@ -274,18 +268,19 @@ export class StandaloneLLMRunner implements LLMRunner {
       compatibility: "compatible",
     });
 
-    // Select tools based on mode
+    // Text-only tasks (L1 extraction, dedup) must not receive tools. Even a
+    // read-only tool lets models drift into "I'll inspect a file first" instead
+    // of returning the strict JSON the pipeline expects.
     const tools = this.enableTools
       ? createSandboxedTools(workspaceDir, this.logger)
-      : createReadOnlyTools(workspaceDir, this.logger);
+      : undefined;
 
     try {
       const result = await generateText({
         model: provider.chat(this.model),
         system: params.systemPrompt,
         prompt: params.prompt,
-        tools,
-        stopWhen: stepCountIs(this.enableTools ? MAX_TOOL_ITERATIONS : 1),
+        ...(tools ? { tools, stopWhen: stepCountIs(MAX_TOOL_ITERATIONS) } : {}),
         maxOutputTokens: maxTokens,
         abortSignal: AbortSignal.timeout(timeoutMs),
       });

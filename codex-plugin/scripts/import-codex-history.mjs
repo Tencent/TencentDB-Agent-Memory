@@ -81,8 +81,12 @@ export async function importCodexHistoryCli(args = process.argv.slice(2)) {
     data: seedData,
     strict_round_role: true,
     auto_fill_timestamps: false,
+    wait_for_l1: opts.waitForL1,
+    l1_concurrency: opts.l1Concurrency,
+    l2_batch_size: opts.l2BatchSize,
     wait_for_full_pipeline: opts.fullPipeline,
-    full_pipeline_timeout_ms: opts.fullPipelineTimeoutMs
+    full_pipeline_timeout_ms: opts.fullPipelineTimeoutMs,
+    import_into_current_store: opts.importIntoCurrentStore
   }, Number(process.env.TDAI_CODEX_SEED_TIMEOUT_MS || DEFAULT_SEED_TIMEOUT_MS));
 
   console.log(JSON.stringify({
@@ -125,6 +129,7 @@ async function parseCodexRollout(entry, opts) {
   let sessionTimestamp = 0;
   let source = "";
   const messages = [];
+  let messageIndex = 0;
 
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -150,11 +155,14 @@ async function parseCodexRollout(entry, opts) {
     const content = sanitizeMemoryText(contentToText(payload.content));
     if (shouldSkipMessage(payload.role, content)) continue;
 
+    const timestamp = timestampMs(row.timestamp) || sessionTimestamp || Date.now();
     messages.push({
+      id: stableMessageId(entry.file, sessionId, messageIndex, payload.role, timestamp, content),
       role: payload.role,
       content,
-      timestamp: timestampMs(row.timestamp) || sessionTimestamp || Date.now()
+      timestamp
     });
+    messageIndex++;
   }
 
   if (opts.since && sessionTimestamp && sessionTimestamp < opts.since) {
@@ -255,6 +263,10 @@ function summarize(files, sessions, skipped, opts) {
     archivedDir: opts.includeArchived ? opts.archivedDir : null,
     includeArchived: opts.includeArchived,
     waitForFullPipeline: opts.fullPipeline,
+    waitForL1: opts.waitForL1,
+    l1Concurrency: opts.l1Concurrency,
+    l2BatchSize: opts.l2BatchSize,
+    importIntoCurrentStore: opts.importIntoCurrentStore,
     fullPipelineTimeoutMs: opts.fullPipelineTimeoutMs,
     cwd: opts.cwd || null,
     since: opts.since ? new Date(opts.since).toISOString() : null,
@@ -273,6 +285,10 @@ function parseArgs(args) {
     archivedDir: path.resolve(expandHome(process.env.CODEX_ARCHIVED_SESSIONS_DIR || DEFAULT_ARCHIVED_DIR)),
     includeArchived: true,
     fullPipeline: true,
+    importIntoCurrentStore: true,
+    waitForL1: true,
+    l1Concurrency: positiveInteger(process.env.TDAI_CODEX_IMPORT_L1_CONCURRENCY, 8),
+    l2BatchSize: positiveInteger(process.env.TDAI_CODEX_IMPORT_L2_BATCH_SIZE, 32, 128),
     fullPipelineTimeoutMs: positiveNumber(process.env.TDAI_CODEX_FULL_PIPELINE_TIMEOUT_MS, DEFAULT_FULL_PIPELINE_TIMEOUT_MS),
     dryRun: false,
     yes: false,
@@ -288,8 +304,15 @@ function parseArgs(args) {
     else if (arg === "--dry-run") opts.dryRun = true;
     else if (arg === "--yes" || arg === "-y") opts.yes = true;
     else if (arg === "--no-archived") opts.includeArchived = false;
-    else if (arg === "--no-full-pipeline") opts.fullPipeline = false;
+    else if (arg === "--no-full-pipeline") {
+      opts.fullPipeline = false;
+      opts.waitForL1 = false;
+    }
+    else if (arg === "--no-wait-for-l1") opts.waitForL1 = false;
+    else if (arg === "--snapshot-seed") opts.importIntoCurrentStore = false;
     else if (arg === "--full-pipeline-timeout-ms") opts.fullPipelineTimeoutMs = positiveNumber(next(args, ++i, arg), 0);
+    else if (arg === "--l1-concurrency") opts.l1Concurrency = positiveInteger(next(args, ++i, arg), 1);
+    else if (arg === "--l2-batch-size") opts.l2BatchSize = positiveInteger(next(args, ++i, arg), 1, 128);
     else if (arg === "--sessions-dir") opts.sessionsDir = path.resolve(expandHome(next(args, ++i, arg)));
     else if (arg === "--archived-dir") opts.archivedDir = path.resolve(expandHome(next(args, ++i, arg)));
     else if (arg === "--cwd") opts.cwd = next(args, ++i, arg);
@@ -321,6 +344,11 @@ function positiveNumber(value, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function positiveInteger(value, fallback, max = 32) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(1, Math.floor(n))) : fallback;
+}
+
 function timestampMs(value) {
   if (typeof value === "number") return value < 10_000_000_000 ? value * 1000 : value;
   if (typeof value === "string") {
@@ -341,6 +369,19 @@ function safeKey(value) {
   return String(value).replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 120);
 }
 
+function stableMessageId(file, sessionId, index, role, timestamp, content) {
+  const digest = sha1([
+    "codex-import-message",
+    path.resolve(file),
+    sessionId,
+    index,
+    role,
+    timestamp,
+    content
+  ].join("\0")).slice(0, 20);
+  return `codex_import_${digest}`;
+}
+
 function usage(code = 0) {
   const message = `Usage: node scripts/import-codex-history.mjs [options]
 
@@ -353,7 +394,11 @@ Options:
   --sessions-dir <path>    Active Codex sessions directory. Default: ${DEFAULT_SESSIONS_DIR}
   --archived-dir <path>    Archived Codex sessions directory. Default: ${DEFAULT_ARCHIVED_DIR}
   --no-archived            Do not include archived Codex JSONL files.
-  --no-full-pipeline       Only seed through the Gateway's default L0/L1 path.
+  --no-full-pipeline       Only write L0 records; skip the final L1/L2/L3 flush.
+  --no-wait-for-l1         Do not wait for per-session L1 batches; intended for L0-only imports.
+  --l1-concurrency <n>     Concurrent L1 extraction tasks for this import. Default: 8.
+  --l2-batch-size <n>      L1 records per bulk L2 scene batch. Default: 32.
+  --snapshot-seed          Write to an isolated seed-* directory instead of the current memory store.
   --full-pipeline-timeout-ms <n>
                            Max wait for the final L1/L2/L3 flush. Default: ${DEFAULT_FULL_PIPELINE_TIMEOUT_MS}
   --cwd <path>             Import only sessions whose session_meta.cwd matches this path.

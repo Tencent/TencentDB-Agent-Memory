@@ -27,7 +27,8 @@
     "pipeline": {
       "everyNConversations": 3,
       "enableWarmup": true,
-      "l1IdleTimeoutSeconds": 300
+      "l1IdleTimeoutSeconds": 300,
+      "l1Concurrency": 1
     },
     "extraction": {
       "enabled": true,

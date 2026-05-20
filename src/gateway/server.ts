@@ -442,16 +442,23 @@ export class TdaiGateway {
     this.logger.info(
       `Seed request: ${input.sessions.length} session(s), ` +
       `${input.totalRounds} round(s), ${input.totalMessages} message(s), ` +
+      `waitL1=${body.wait_for_l1 !== false}, ` +
+      `l1Concurrency=${body.l1_concurrency ?? "(config)"}, ` +
+      `l2BatchSize=${body.l2_batch_size ?? "(disabled)"}, ` +
+      `currentStore=${body.import_into_current_store === true}, ` +
       `waitFullPipeline=${body.wait_for_full_pipeline === true}`,
     );
 
-    // Resolve output directory: use gateway's data dir with a timestamped subfolder
+    // Resolve output directory. Normal seed runs are isolated for inspection;
+    // trusted local importers can explicitly target the live store.
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     const ts =
       `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
       `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const outputDir = `${this.config.data.baseDir}/seed-${ts}`;
+    const outputDir = body.import_into_current_store === true
+      ? this.config.data.baseDir
+      : `${this.config.data.baseDir}/seed-${ts}`;
 
     // Merge config overrides if provided
     // Start with the base memory config + inject llm config from gateway settings
@@ -494,10 +501,14 @@ export class TdaiGateway {
       outputDir,
       openclawConfig: {},
       pluginConfig,
+      waitForL1: body.wait_for_l1 !== false,
+      l1Concurrency: body.l1_concurrency,
+      l2BatchSize: body.l2_batch_size,
       waitForFullPipeline: body.wait_for_full_pipeline === true,
       fullPipelineFlushTimeoutMs: typeof body.full_pipeline_timeout_ms === "number"
         ? body.full_pipeline_timeout_ms
         : undefined,
+      ownsStoreResources: body.import_into_current_store !== true,
       logger: this.logger as import("../utils/pipeline-factory.js").PipelineLogger,
       onProgress: (progress: SeedProgress) => {
         this.logger.debug?.(

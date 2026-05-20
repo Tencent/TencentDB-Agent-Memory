@@ -123,6 +123,8 @@ export interface PipelineConfig {
   l1: {
     /** Idle timeout before triggering L1 (seconds, default: 60) */
     idleTimeoutSeconds: number;
+    /** Number of L1 extraction tasks allowed to run concurrently (default: 1). */
+    concurrency?: number;
   };
 
   l2: {
@@ -221,6 +223,8 @@ interface SessionTimerState {
   l2Schedule: ManagedTimer;
   /** Whether an L1 task is already queued or running for this session. */
   l1Queued: boolean;
+  /** Promise for the currently queued/running L1 task for this session. */
+  l1Promise?: Promise<void>;
   /** Whether an L2 task is already queued or running for this session. */
   l2Queued: boolean;
   /** Consecutive L1 failure count for retry limiting. Reset on success or new conversation. */
@@ -243,7 +247,7 @@ export class MemoryPipelineManager {
   private readonly L1_MAX_RETRIES = 5;
 
   // Queues (named for diagnostics)
-  private readonly l1Queue = new SerialQueue("L1");
+  private readonly l1Queue: SerialQueue;
   private readonly l2Queue = new SerialQueue("L2");
   private readonly l3Queue = new SerialQueue("L3");
 
@@ -296,11 +300,13 @@ export class MemoryPipelineManager {
     this.sessionActiveWindowMs = config.l2.sessionActiveWindowHours * 60 * 60 * 1000;
     this.logger = logger;
     this.sessionFilter = sessionFilter ?? new SessionFilter();
+    this.l1Queue = new SerialQueue("L1", config.l1.concurrency ?? 1);
 
     this.logger?.debug?.(
       `${TAG} Initialized: everyNConversations=${config.everyNConversations}, ` +
       `warmup=${config.enableWarmup ? "enabled" : "disabled"}, ` +
       `l1IdleTimeout=${config.l1.idleTimeoutSeconds}s, ` +
+      `l1Concurrency=${this.l1Queue.concurrency}, ` +
       `l2DelayAfterL1=${config.l2.delayAfterL1Seconds}s, ` +
       `l2MinInterval=${config.l2.minIntervalSeconds}s, ` +
       `l2MaxInterval=${config.l2.maxIntervalSeconds}s, ` +
@@ -493,10 +499,10 @@ export class MemoryPipelineManager {
    *      fires for this key).
    *   2. If the session's message buffer still holds work, enqueue an
    *      immediate L1 run for this session (``triggerReason="flush"``).
-   *   3. Await the shared ``l1Queue`` so the caller observes L1
-   *      completion before returning.  We do not selectively wait
-   *      because L1 is already a single-consumer SerialQueue — waiting
-   *      for ``onIdle`` is the cheapest correct signal.
+   *   3. Await this session's queued/running L1 task so the caller observes
+   *      target-session completion before returning.  This intentionally does
+   *      not wait for the whole L1 queue, because unrelated seed/import workers
+   *      may be processing other sessions concurrently.
    *
    * What it deliberately does NOT do:
    *   - Touch other sessions' timers / buffers / pipeline state.
@@ -513,26 +519,27 @@ export class MemoryPipelineManager {
 
     const timers = this.sessionTimers.get(sessionKey);
     const buffer = this.messageBuffers.get(sessionKey);
+    const state = this.sessionStates.get(sessionKey);
 
     // Step 1: cancel the idle timer so it won't fire after we return.
     if (timers?.l1Idle.pending) {
       timers.l1Idle.cancel();
     }
 
-    // Step 2: flush pending buffered messages through L1 if any.
-    if (buffer && buffer.length > 0) {
+    // Step 2: flush pending L1 work if any. In the Gateway/seed path the L1
+    // runner reads L0 from the store, so the in-memory buffer can be empty
+    // while conversation_count still represents unextracted DB-backed work.
+    if ((buffer && buffer.length > 0) || (state && state.conversation_count > 0)) {
       this.logger?.debug?.(
-        `${TAG} [${sessionKey}] flushSession: enqueuing L1 for ${buffer.length} buffered message(s)`,
+        `${TAG} [${sessionKey}] flushSession: enqueuing L1 for ` +
+        `${buffer?.length ?? 0} buffered message(s), conversations=${state?.conversation_count ?? 0}`,
       );
       this.enqueueL1(sessionKey, "flush");
     }
 
-    // Step 3: wait for L1 to drain.  L1 is a single-consumer SerialQueue
-    // so this is the cheapest correct signal; it will not starve other
-    // sessions because any cross-session interleaving L1 work was either
-    // already queued or will be queued concurrently by their own capture
-    // paths.
-    await this.l1Queue.onIdle();
+    // Step 3: wait for this session's L1 task only. Waiting for the shared
+    // queue to become globally idle would serialize unrelated seed workers.
+    await timers?.l1Promise;
 
     this.logger?.debug?.(`${TAG} [${sessionKey}] flushSession: complete`);
   }
@@ -644,15 +651,22 @@ export class MemoryPipelineManager {
     }
 
     try {
-      // Step 1: Flush all L1 idle timers — only enqueue if there are buffered messages
+      // Step 1: Flush all immediate L1 work. Do not key this solely off the
+      // idle timer: recovery/seed paths can have DB-backed conversation_count
+      // without a pending timer, and final flush must still advance it.
       for (const [sessionKey, timers] of this.sessionTimers) {
         if (timers.l1Idle.pending) {
           timers.l1Idle.cancel(); // don't fire the idle callback directly
-          const buffer = this.messageBuffers.get(sessionKey);
-          if (buffer && buffer.length > 0) {
-            this.logger?.debug?.(`${TAG} [${sessionKey}] Flush: enqueuing L1 for ${buffer.length} buffered messages`);
-            this.enqueueL1(sessionKey, "flush");
-          }
+        }
+
+        const buffer = this.messageBuffers.get(sessionKey);
+        const state = this.sessionStates.get(sessionKey);
+        if ((buffer && buffer.length > 0) || (state && state.conversation_count > 0)) {
+          this.logger?.debug?.(
+            `${TAG} [${sessionKey}] Flush: enqueuing L1 for ` +
+            `${buffer?.length ?? 0} buffered messages, conversations=${state?.conversation_count ?? 0}`,
+          );
+          this.enqueueL1(sessionKey, "flush");
         }
       }
 
@@ -762,7 +776,7 @@ export class MemoryPipelineManager {
       });
     }
 
-    this.l1Queue.add(async () => {
+    const taskPromise = this.l1Queue.add(async () => {
       await this.runL1(sessionKey);
     }).catch((err) => {
       this.logger?.error(
@@ -770,7 +784,9 @@ export class MemoryPipelineManager {
       );
     }).finally(() => {
       timers.l1Queued = false;
+      timers.l1Promise = undefined;
     });
+    timers.l1Promise = taskPromise;
   }
 
   /**
@@ -1248,9 +1264,65 @@ export class MemoryPipelineManager {
     return this.messageBuffers.get(sessionKey)?.length ?? 0;
   }
 
+  /** Whether a specific session still has L1 work queued, running, or buffered. */
+  hasPendingL1Work(sessionKey: string): boolean {
+    const timers = this.sessionTimers.get(sessionKey);
+    const state = this.sessionStates.get(sessionKey);
+    const buffered = this.messageBuffers.get(sessionKey)?.length ?? 0;
+    const conversations = state?.conversation_count ?? 0;
+
+    return Boolean(timers?.l1Queued) || buffered > 0 || conversations > 0;
+  }
+
   /** Get all session keys being tracked. */
   getSessionKeys(): string[] {
     return Array.from(this.sessionStates.keys());
+  }
+
+  /** Get session keys with L1 output that still needs L2 scene extraction. */
+  getPendingL2SessionKeys(): string[] {
+    const keys: string[] = [];
+    for (const [sessionKey, state] of this.sessionStates) {
+      if ((state.l2_pending_l1_count ?? 0) > 0) keys.push(sessionKey);
+    }
+    return keys;
+  }
+
+  /**
+   * Mark L2 complete for a set of sessions after an external/bulk L2 flush.
+   *
+   * Seed imports can coalesce many small historical Codex sessions into larger
+   * L2 batches to avoid thousands of tiny scene-extraction calls. This method
+   * updates the scheduler-owned state and cancels stale L2 timers so the later
+   * shutdown flush does not replay already-coalesced work.
+   */
+  async markL2FlushedForSessions(
+    sessionKeys: string[],
+    latestCursorBySession: Map<string, string> = new Map(),
+  ): Promise<void> {
+    if (sessionKeys.length === 0) return;
+
+    const nowIso = new Date().toISOString();
+    for (const sessionKey of sessionKeys) {
+      const state = this.sessionStates.get(sessionKey);
+      if (!state) continue;
+
+      state.l2_pending_l1_count = 0;
+      state.last_extraction_time = nowIso;
+      state.l2_last_extraction_time = nowIso;
+
+      const latestCursor = latestCursorBySession.get(sessionKey);
+      if (latestCursor) {
+        state.last_extraction_updated_time = latestCursor;
+      }
+
+      const timers = this.sessionTimers.get(sessionKey);
+      if (timers?.l2Schedule.pending) {
+        timers.l2Schedule.cancel();
+      }
+    }
+
+    await this.persistStates();
   }
 
   /** Whether the pipeline has been destroyed. */

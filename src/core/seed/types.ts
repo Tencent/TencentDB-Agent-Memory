@@ -13,6 +13,8 @@
 
 /** A single message in a conversation round. */
 export interface RawMessage {
+  /** Optional stable message ID. Useful for idempotent historical imports. */
+  id?: string;
   role: string;
   content: string;
   /**
@@ -43,6 +45,8 @@ export type FormatB = RawSession[];
 // ============================
 
 export interface NormalizedMessage {
+  /** Stable message ID when provided by the input. */
+  id?: string;
   role: string;
   content: string;
   /** Epoch ms — always present after normalization (filled if originally missing). */
@@ -113,6 +117,12 @@ export interface SeedCommandOptions {
   configFile?: string;
   /** Wait for final L1→L2→L3 processing before returning. */
   waitForFullPipeline?: boolean;
+  /** Wait for L1 at per-batch boundaries before feeding more rounds. */
+  waitForL1?: boolean;
+  /** Bounded L1 extraction concurrency for this seed run. */
+  l1Concurrency?: number;
+  /** Coalesce pending L2 records into batches during final full-pipeline flush. */
+  l2BatchSize?: number;
   /** Max wait time for final L1→L2→L3 processing. */
   fullPipelineTimeoutMs?: number;
 }

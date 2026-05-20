@@ -17,6 +17,7 @@ import {
   sanitizeMemoryText,
   sessionKeyFromPayload,
 } from "./lib.mjs";
+import { buildAdapterDoctorReport } from "./doctor.mjs";
 import {
   lookupCodexOffload,
   recordCodexToolOffload,
@@ -335,6 +336,22 @@ ${privateKeyBlock}
     await expect(healthCheck()).resolves.toBe(false);
     await expect(httpPost("/capture", { user_content: "secret" })).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ships a portable adapter profile and doctor report for reuse", async () => {
+    process.env.TDAI_CODEX_AUTOSTART = "false";
+    process.env.TDAI_CODEX_GATEWAY_URL = "http://127.0.0.1:9";
+
+    const report = await buildAdapterDoctorReport({
+      pluginRoot: path.resolve("codex-plugin"),
+    });
+
+    expect(report.adapter.id).toBe("memory-tencentdb-codex");
+    expect(report.checks.find((check) => check.name === "entrypoint:pluginManifest")?.ok).toBe(true);
+    expect(report.checks.find((check) => check.name === "entrypoint:doctor")?.ok).toBe(true);
+    expect(report.checks.find((check) => check.name === "portable:hooks.codex.json")?.ok).toBe(true);
+    expect(report.checks.find((check) => check.name === "portable:.mcp.json")?.ok).toBe(true);
+    expect(report.ok).toBe(true);
   });
 });
 

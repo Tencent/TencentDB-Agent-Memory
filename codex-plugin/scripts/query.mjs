@@ -74,11 +74,13 @@ if (command === "status") {
   }
   const fullPipelineTimeoutMs = positiveNumber(process.env.TDAI_CODEX_FULL_PIPELINE_TIMEOUT_MS, 900000);
   const seedTimeoutMs = positiveNumber(process.env.TDAI_CODEX_SEED_TIMEOUT_MS, 960000);
+  const l1Concurrency = positiveInteger(process.env.TDAI_CODEX_SEED_L1_CONCURRENCY, 1);
   const dataPath = path.resolve(expandHome(file));
   const data = JSON.parse(await readFile(dataPath, "utf-8"));
   const result = await httpPost("/seed", {
     data,
     session_key: sessionKeyFromPayload(payload),
+    l1_concurrency: l1Concurrency,
     wait_for_full_pipeline: process.env.TDAI_CODEX_SEED_FULL_PIPELINE !== "false",
     full_pipeline_timeout_ms: fullPipelineTimeoutMs
   }, seedTimeoutMs);
@@ -86,6 +88,9 @@ if (command === "status") {
 } else if (command === "import-codex-history") {
   const { importCodexHistoryCli } = await import("./import-codex-history.mjs");
   await importCodexHistoryCli(args);
+} else if (command === "doctor") {
+  const { doctorCli } = await import("./doctor.mjs");
+  await doctorCli(args);
 } else if (command === "offload") {
   const { offloadCli } = await import("./offload-store.mjs");
   await offloadCli(args, {
@@ -97,7 +102,7 @@ if (command === "status") {
 }
 
 function usage(code = 0) {
-  console.error("Usage: node scripts/query.mjs [status|memory <query>|conversation <query>|remember <text>|flush|seed <json-file>|import-codex-history [options]|offload <list|node|canvas>]");
+  console.error("Usage: node scripts/query.mjs [status|memory <query>|conversation <query>|remember <text>|flush|seed <json-file>|import-codex-history [options]|doctor [options]|offload <list|node|canvas>]");
   process.exit(code);
 }
 
@@ -111,4 +116,9 @@ async function readTextFromStdin() {
 function positiveNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function positiveInteger(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(32, Math.max(1, Math.floor(n))) : fallback;
 }

@@ -31,6 +31,9 @@ export function registerSeedCommand(parent: Command, ctx: SeedCliContext): void 
     .option("--session-key <key>", "Fallback session key when input lacks one")
     .option("--config <file>", "Path to memory-tdai config override file (JSON, deep-merged on top of current plugin config)")
     .option("--strict-round-role", "Require each round to have both user and assistant messages", false)
+    .option("--no-wait-for-l1", "Do not pause at per-batch L1 boundaries; useful with --wait-for-full-pipeline for large imports")
+    .option("--l1-concurrency <n>", "Bounded concurrent L1 extraction tasks for this seed run")
+    .option("--l2-batch-size <n>", "Coalesce pending L2 records into batches during final full-pipeline flush")
     .option("--wait-for-full-pipeline", "Wait for final L1→L2→L3 processing before returning", false)
     .option("--full-pipeline-timeout-ms <ms>", "Max wait time for final L1→L2→L3 processing", "900000")
     .option("--yes", "Skip interactive confirmations (e.g. timestamp auto-fill)", false)
@@ -50,6 +53,13 @@ Examples:
         yes: rawOpts.yes === true,
         configFile: rawOpts.config as string | undefined,
         waitForFullPipeline: rawOpts.waitForFullPipeline === true,
+        waitForL1: rawOpts.waitForL1 !== false,
+        l1Concurrency: rawOpts.l1Concurrency === undefined
+          ? undefined
+          : Number(rawOpts.l1Concurrency) || undefined,
+        l2BatchSize: rawOpts.l2BatchSize === undefined
+          ? undefined
+          : Number(rawOpts.l2BatchSize) || undefined,
         fullPipelineTimeoutMs: Number(rawOpts.fullPipelineTimeoutMs) || undefined,
       };
 
@@ -70,6 +80,9 @@ async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Pr
   logger.info(`${TAG}   sessionKey: ${opts.sessionKey ?? "(from input)"}`);
   logger.info(`${TAG}   config:     ${opts.configFile ?? "(default)"}`);
   logger.info(`${TAG}   strict:     ${opts.strictRoundRole}`);
+  logger.info(`${TAG}   waitL1:     ${opts.waitForL1 !== false}`);
+  logger.info(`${TAG}   l1Conc:     ${opts.l1Concurrency ?? "(config)"}`);
+  logger.info(`${TAG}   l2Batch:    ${opts.l2BatchSize ?? "(disabled)"}`);
   logger.info(`${TAG}   full:       ${opts.waitForFullPipeline === true}`);
   logger.info(`${TAG}   yes:        ${opts.yes}`);
 
@@ -154,6 +167,9 @@ async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Pr
     openclawConfig: ctx.config,
     pluginConfig: mergedPluginConfig,
     inputFile: opts.input,
+    waitForL1: opts.waitForL1 !== false,
+    l1Concurrency: opts.l1Concurrency,
+    l2BatchSize: opts.l2BatchSize,
     waitForFullPipeline: opts.waitForFullPipeline === true,
     fullPipelineFlushTimeoutMs: opts.fullPipelineTimeoutMs,
     logger,

@@ -26,6 +26,8 @@ openclaw memory-tdai seed --input <file> [options]
 | `--session-key <key>` | — | 回退 session key（当输入数据缺少时使用） |
 | `--config <file>` | — | 配置覆盖文件（JSON，与 openclaw.json 插件配置深度合并） |
 | `--strict-round-role` | — | 严格校验每轮对话必须包含 user 和 assistant 消息 |
+| `--no-wait-for-l1` | — | 不在每批 L1 边界暂停；通常只用于大规模导入 |
+| `--l1-concurrency <n>` | — | 本次 seed 的 L1 抽取并发数（默认使用配置值） |
 | `--wait-for-full-pipeline` | — | 返回前等待最终 L1→L2→L3 flush 完成 |
 | `--full-pipeline-timeout-ms <ms>` | — | 最终 L1→L2→L3 flush 的最长等待时间（默认 900000） |
 | `--yes` | — | 跳过交互确认（如时间戳自动填充确认） |
@@ -121,6 +123,7 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
     "everyNConversations": 3,
     "enableWarmup": false,
     "l1IdleTimeoutSeconds": 2,
+    "l1Concurrency": 4,
     "l2DelayAfterL1Seconds": 1,
     "l2MinIntervalSeconds": 1,
     "l2MaxIntervalSeconds": 10
@@ -139,7 +142,8 @@ openclaw memory-tdai seed --input data.json --config seed-config.json --strict-r
   "pipeline": {
     "everyNConversations": 3,
     "enableWarmup": false,
-    "l1IdleTimeoutSeconds": 2
+    "l1IdleTimeoutSeconds": 2,
+    "l1Concurrency": 4
   }
 }
 ```

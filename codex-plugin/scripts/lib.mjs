@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
@@ -993,6 +995,12 @@ export async function httpPost(route, body, timeoutMs = DEFAULT_RECALL_TIMEOUT_M
   if (!isAllowedGatewayEndpoint()) return null;
   if (await isGatewayCircuitOpen()) return null;
   try {
+    if (timeoutMs > 300_000 || route === "/seed") {
+      const json = await httpPostLong(route, body, timeoutMs);
+      await recordGatewaySuccess();
+      return json;
+    }
+
     const headers = {
       "Content-Type": "application/json",
       ...await gatewayAuthHeaders()
@@ -1016,6 +1024,47 @@ export async function httpPost(route, body, timeoutMs = DEFAULT_RECALL_TIMEOUT_M
     await recordGatewayFailure(route);
     return null;
   }
+}
+
+async function httpPostLong(route, body, timeoutMs) {
+  const url = new URL(`${gatewayUrl()}${route}`);
+  const payload = JSON.stringify(body);
+  const headers = {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(payload),
+    ...await gatewayAuthHeaders()
+  };
+  const client = url.protocol === "https:" ? https : http;
+
+  return await new Promise((resolve, reject) => {
+    const req = client.request(url, {
+      method: "POST",
+      headers,
+      timeout: timeoutMs,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf-8");
+        if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
+          reject(new Error(`Gateway ${route} returned ${res.statusCode}: ${text}`));
+          return;
+        }
+        try {
+          resolve(text ? JSON.parse(text) : null);
+        } catch (err) {
+          reject(new Error(`Gateway ${route} returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`));
+        }
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy(new Error(`Gateway ${route} timed out after ${timeoutMs}ms`));
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 function isAllowedGatewayEndpoint() {
