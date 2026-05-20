@@ -10,7 +10,7 @@
  * The tool is registered via `api.registerTool()` in index.ts.
  */
 
-import type { IMemoryStore, L1SearchResult } from "../store/types.js";
+import type { IMemoryStore, L1SearchResult, SearchScopeOptions } from "../store/types.js";
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService } from "../store/embedding.js";
 
@@ -48,7 +48,6 @@ export interface MemorySearchResult {
 
 const TAG = "[memory-tdai][tdai_memory_search]";
 const FILTERED_SEARCH_INITIAL_CANDIDATES = 50;
-const FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES = 500;
 
 // ============================
 // RRF (Reciprocal Rank Fusion)
@@ -146,82 +145,47 @@ export async function executeMemorySearch(params: {
     };
   }
 
-  let candidateK = normalizedSessionPrefixes.length > 0
+  const searchScope: SearchScopeOptions | undefined = normalizedSessionPrefixes.length > 0
+    ? { sessionKeyPrefixes: normalizedSessionPrefixes }
+    : undefined;
+  const candidateK = normalizedSessionPrefixes.length > 0
     ? Math.max(limit * 6, FILTERED_SEARCH_INITIAL_CANDIDATES)
     : limit * 3;
-  const maxCandidateK = normalizedSessionPrefixes.length > 0
-    ? await scopedSearchMaxCandidates({
-        count: () => vectorStore.countL1(),
-        candidateK,
-        logger,
-      })
-    : candidateK;
 
-  while (true) {
-    const search = await collectMemoryCandidates({
-      query,
-      candidateK,
-      hasFts,
-      hasEmbedding,
-      vectorStore,
-      embeddingService,
-      logger,
-    });
+  const search = await collectMemoryCandidates({
+    query,
+    candidateK,
+    hasFts,
+    hasEmbedding,
+    vectorStore,
+    embeddingService,
+    searchScope,
+    logger,
+  });
 
-    if (search.results.length === 0) {
-      logger?.debug?.(`${TAG} Both search paths returned 0 results`);
-      return { results: [], total: 0, strategy: hasEmbedding ? "embedding" : "fts" };
-    }
-
-    const filtered = filterMemoryResults(search.results, {
-      typeFilter,
-      sceneFilter,
-      sessionPrefixes: normalizedSessionPrefixes,
-      logger,
-    });
-    const trimmed = filtered.slice(0, limit);
-
-    if (
-      trimmed.length >= limit ||
-      normalizedSessionPrefixes.length === 0 ||
-      !search.mayHaveMore ||
-      candidateK >= maxCandidateK
-    ) {
-      logger?.debug?.(
-        `${TAG} RESULT (strategy=${search.strategy}, candidateK=${candidateK}): returning ${trimmed.length} memories ` +
-        `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
-      );
-
-      return {
-        results: trimmed,
-        total: trimmed.length,
-        strategy: search.strategy,
-      };
-    }
-
-    candidateK = Math.min(candidateK * 2, maxCandidateK);
-    logger?.debug?.(`${TAG} Expanding scoped search window to candidateK=${candidateK}`);
+  if (search.results.length === 0) {
+    logger?.debug?.(`${TAG} Both search paths returned 0 results`);
+    return { results: [], total: 0, strategy: hasEmbedding ? "embedding" : "fts" };
   }
-}
 
-async function scopedSearchMaxCandidates(params: {
-  count: () => number | Promise<number>;
-  candidateK: number;
-  logger?: Logger;
-}): Promise<number> {
-  const { count, candidateK, logger } = params;
-  try {
-    const total = await count();
-    if (Number.isFinite(total) && total > 0) {
-      return Math.max(candidateK, Math.floor(total));
-    }
-  } catch (err) {
-    logger?.warn?.(
-      `${TAG} Scoped search could not count records; falling back to ${FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES} candidates: ` +
-      `${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  return Math.max(candidateK, FILTERED_SEARCH_FALLBACK_MAX_CANDIDATES);
+  const filtered = filterMemoryResults(search.results, {
+    typeFilter,
+    sceneFilter,
+    sessionPrefixes: normalizedSessionPrefixes,
+    logger,
+  });
+  const trimmed = filtered.slice(0, limit);
+
+  logger?.debug?.(
+    `${TAG} RESULT (strategy=${search.strategy}, candidateK=${candidateK}): returning ${trimmed.length} memories ` +
+    `(scores: [${trimmed.map((r) => r.score.toFixed(3)).join(", ")}])`,
+  );
+
+  return {
+    results: trimmed,
+    total: trimmed.length,
+    strategy: search.strategy,
+  };
 }
 
 async function collectMemoryCandidates(params: {
@@ -231,9 +195,10 @@ async function collectMemoryCandidates(params: {
   hasEmbedding: boolean;
   vectorStore: IMemoryStore;
   embeddingService?: EmbeddingService;
+  searchScope?: SearchScopeOptions;
   logger?: Logger;
 }): Promise<{ results: MemorySearchResultItem[]; strategy: string; mayHaveMore: boolean }> {
-  const { query, candidateK, hasFts, hasEmbedding, vectorStore, embeddingService, logger } = params;
+  const { query, candidateK, hasFts, hasEmbedding, vectorStore, embeddingService, searchScope, logger } = params;
 
   const [ftsItems, vecItems] = await Promise.all([
     (async (): Promise<MemorySearchResultItem[]> => {
@@ -245,7 +210,7 @@ async function collectMemoryCandidates(params: {
           return [];
         }
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 query: "${ftsQuery}"`);
-        const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+        const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK, searchScope);
         logger?.debug?.(`${TAG} [hybrid-fts] FTS5 returned ${ftsResults.length} candidates`);
         return ftsResults.map(memoryResultItemFromStore);
       } catch (err) {
@@ -263,7 +228,7 @@ async function collectMemoryCandidates(params: {
         logger?.debug?.(
           `${TAG} [hybrid-vec] Embedding OK, dims=${queryEmbedding.length}, searching top-${candidateK}...`,
         );
-        const vecResults: L1SearchResult[] = await vectorStore.searchL1Vector(queryEmbedding, candidateK, query);
+        const vecResults: L1SearchResult[] = await vectorStore.searchL1Vector(queryEmbedding, candidateK, query, searchScope);
         logger?.debug?.(`${TAG} [hybrid-vec] Vector search returned ${vecResults.length} candidates`);
         return vecResults.map(memoryResultItemFromStore);
       } catch (err) {
