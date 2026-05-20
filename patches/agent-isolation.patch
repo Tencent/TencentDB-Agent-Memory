@@ -1,0 +1,172 @@
+11558a11559,11576
+> }
+> /**
+>  * Per-agent data directory resolver.
+>  * Routes pluginDataDir to agents/{agentId}/ subdirectory based on sessionKey.
+>  * Falls back to baseDir if agentId cannot be extracted.
+>  * Patched 2026-05-20: cross-agent memory isolation.
+>  */
+> const _agentDirCache = /* @__PURE__ */ new Map();
+> function resolveAgentDataDir(baseDir, sessionKey, logger) {
+> 	const agentId = extractAgentId(sessionKey);
+> 	if (!agentId) return baseDir;
+> 	const cacheKey = baseDir + "/" + agentId;
+> 	if (_agentDirCache.has(cacheKey)) return _agentDirCache.get(cacheKey);
+> 	const agentDir = path.join(baseDir, "agents", agentId);
+> 	initDataDirectories(agentDir);
+> 	_agentDirCache.set(cacheKey, agentDir);
+> 	logger?.debug?.(`[memory-tdai] [agent-isolation] sessionKey=${sessionKey} → dataDir=${agentDir}`);
+> 	return agentDir;
+15623c15641
+< 		const searchResult = await searchMemories(userText, pluginDataDir, cfg, logger, effectiveStrategy, vectorStore, embeddingService);
+---
+> 		const searchResult = await searchMemories(userText, pluginDataDir, cfg, logger, effectiveStrategy, vectorStore, embeddingService, extractAgentId(params.sessionKey) || void 0);
+15700c15718
+< async function searchMemories(userText, pluginDataDir, cfg, logger, strategy, vectorStore, embeddingService) {
+---
+> async function searchMemories(userText, pluginDataDir, cfg, logger, strategy, vectorStore, embeddingService, _filterAgentId) {
+15730c15748
+< 			const lines = await searchByKeyword(cleanText, pluginDataDir, maxResults, threshold, logger, vectorStore);
+---
+> 			const lines = await searchByKeyword(cleanText, pluginDataDir, maxResults, threshold, logger, vectorStore, _filterAgentId);
+15743c15761
+< 			const lines = await searchByEmbedding(cleanText, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts);
+---
+> 			const lines = await searchByEmbedding(cleanText, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts, _filterAgentId);
+15772c15790
+< 		return await searchHybrid(cleanText, pluginDataDir, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts);
+---
+> 		return await searchHybrid(cleanText, pluginDataDir, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts, _filterAgentId);
+15778c15796
+< async function searchByKeyword(userText, _pluginDataDir, maxResults, threshold, logger, vectorStore) {
+---
+> async function searchByKeyword(userText, _pluginDataDir, maxResults, threshold, logger, vectorStore, _filterAgentId) {
+15783c15801,15802
+< 			const ftsResults = await vectorStore.searchL1Fts(ftsQuery, maxResults * 2);
+---
+> 			let ftsResults = await vectorStore.searchL1Fts(ftsQuery, maxResults * 2);
+> 			if (_filterAgentId) ftsResults = ftsResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+15802c15821
+< async function searchByEmbedding(userText, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts) {
+---
+> async function searchByEmbedding(userText, maxResults, threshold, vectorStore, embeddingService, logger, embeddingCallOpts, _filterAgentId) {
+15806c15825,15826
+< 	const vecResults = await vectorStore.searchL1Vector(queryEmbedding, maxResults * 2);
+---
+> 	let vecResults = await vectorStore.searchL1Vector(queryEmbedding, maxResults * 2);
+> 	if (_filterAgentId) vecResults = vecResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+15831c15851
+< async function searchHybrid(userText, _pluginDataDir, maxResults, _threshold, vectorStore, embeddingService, logger, embeddingCallOpts) {
+---
+> async function searchHybrid(userText, _pluginDataDir, maxResults, _threshold, vectorStore, embeddingService, logger, embeddingCallOpts, _filterAgentId) {
+15839c15859,15860
+< 					const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+---
+> 					let ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+> 					if (_filterAgentId) ftsResults = ftsResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+15889c15910,15911
+< 			const results = await vectorStore.searchL1Vector(queryEmbedding, candidateK, userText);
+---
+> 			let results = await vectorStore.searchL1Vector(queryEmbedding, candidateK, userText);
+> 			if (_filterAgentId) results = results.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+16069c16091
+< 	const { query, limit, type: typeFilter, scene: sceneFilter, vectorStore, embeddingService, logger } = params;
+---
+> 	const { query, limit, type: typeFilter, scene: sceneFilter, vectorStore, embeddingService, logger, _filterAgentId } = params;
+16108c16130,16131
+< 			const ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+---
+> 			let ftsResults = await vectorStore.searchL1Fts(ftsQuery, candidateK);
+> 			if (_filterAgentId) ftsResults = ftsResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+16118c16141,16142
+< 				updated_at: r.timestamp_end
+---
+> 				updated_at: r.timestamp_end,
+> 				session_key: r.session_key
+16130c16154,16155
+< 			const vecResults = await vectorStore.searchL1Vector(queryEmbedding, candidateK, query);
+---
+> 			let vecResults = await vectorStore.searchL1Vector(queryEmbedding, candidateK, query);
+> 			if (_filterAgentId) vecResults = vecResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+16140c16165,16166
+< 				updated_at: r.timestamp_end
+---
+> 				updated_at: r.timestamp_end,
+> 				session_key: r.session_key
+16228c16254
+< 	const { query, limit, sessionKey: sessionFilter, vectorStore, embeddingService, logger } = params;
+---
+> 	const { query, limit, sessionKey: sessionFilter, vectorStore, embeddingService, logger, _filterAgentId } = params;
+16267c16293,16294
+< 			const ftsResults = await vectorStore.searchL0Fts(ftsQuery, candidateK);
+---
+> 			let ftsResults = await vectorStore.searchL0Fts(ftsQuery, candidateK);
+> 			if (_filterAgentId) ftsResults = ftsResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+16287c16314,16315
+< 			const vecResults = await vectorStore.searchL0Vector(queryEmbedding, candidateK, query);
+---
+> 			let vecResults = await vectorStore.searchL0Vector(queryEmbedding, candidateK, query);
+> 			if (_filterAgentId) vecResults = vecResults.filter(r => { const a = extractAgentId(r.session_key || ''); return !a || a === _filterAgentId; });
+16428a16457,16459
+> 		const _agentDir = resolveAgentDataDir(this.dataDir, sessionKey, this.logger);
+> 		// Phase 2: track current agent for search filtering
+> 		this._lastRecallAgentId = extractAgentId(sessionKey) || void 0;
+16434c16465
+< 			pluginDataDir: this.dataDir,
+---
+> 			pluginDataDir: _agentDir,
+16446a16478
+> 		const _agentDir = resolveAgentDataDir(this.dataDir, turn.sessionKey, this.logger);
+16452c16484
+< 			pluginDataDir: this.dataDir,
+---
+> 			pluginDataDir: _agentDir,
+16475c16507,16508
+< 			logger: this.logger
+---
+> 			logger: this.logger,
+> 			_filterAgentId: this._lastRecallAgentId
+16494c16527,16528
+< 			logger: this.logger
+---
+> 			logger: this.logger,
+> 			_filterAgentId: this._lastRecallAgentId
+16593,16602c16627,16639
+< 		this.scheduler.setL1Runner(createL1Runner({
+< 			pluginDataDir: this.dataDir,
+< 			cfg: this.cfg,
+< 			openclawConfig,
+< 			vectorStore: this.vectorStore,
+< 			embeddingService: this.embeddingService,
+< 			logger: this.logger,
+< 			getInstanceId: () => this.instanceId,
+< 			llmRunner: l1LlmRunner
+< 		}));
+---
+> 		this.scheduler.setL1Runner(async ({ sessionKey }) => {
+> 			const _agentDir = resolveAgentDataDir(this.dataDir, sessionKey, this.logger);
+> 			return createL1Runner({
+> 				pluginDataDir: _agentDir,
+> 				cfg: this.cfg,
+> 				openclawConfig,
+> 				vectorStore: this.vectorStore,
+> 				embeddingService: this.embeddingService,
+> 				logger: this.logger,
+> 				getInstanceId: () => this.instanceId,
+> 				llmRunner: l1LlmRunner
+> 			})({ sessionKey });
+> 		});
+16604a16642
+> 			const _agentDir = resolveAgentDataDir(this.dataDir, sessionKey, this.logger);
+16606c16644
+< 				pluginDataDir: this.dataDir,
+---
+> 				pluginDataDir: _agentDir,
+16615a16654
+> 			// L3 runner iterates all sessions; route each to its agent dir
+16623c16662,16664
+< 				llmRunner: l2l3LlmRunner
+---
+> 				llmRunner: l2l3LlmRunner,
+> 				// Pass agent resolver for per-agent persona generation
+> 				agentDataDirResolver: (sk) => resolveAgentDataDir(this.dataDir, sk, this.logger)
