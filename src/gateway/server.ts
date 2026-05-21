@@ -14,7 +14,9 @@
  * Designed to run as a managed sidecar alongside Hermes.
  */
 
+import { createHash } from "node:crypto";
 import http from "node:http";
+import path from "node:path";
 import { URL } from "node:url";
 import { TdaiCore } from "../core/tdai-core.js";
 import { StandaloneHostAdapter } from "../adapters/standalone/host-adapter.js";
@@ -45,6 +47,43 @@ import type { SeedProgress } from "../core/seed/types.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
+
+// ============================
+// User data scope
+// ============================
+
+export interface GatewayUserScope {
+  cacheKey: string;
+  dataDir: string;
+  isolated: boolean;
+}
+
+function safePathSegment(value: string): string {
+  const normalized = value.normalize("NFKC").trim();
+  const slug = normalized
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "user";
+  const digest = createHash("sha256").update(normalized).digest("hex").slice(0, 12);
+  return `${slug}-${digest}`;
+}
+
+export function resolveGatewayUserScope(baseDir: string, userId?: string): GatewayUserScope {
+  const identity = userId?.trim();
+  if (!identity) {
+    return {
+      cacheKey: "legacy",
+      dataDir: baseDir,
+      isolated: false,
+    };
+  }
+
+  return {
+    cacheKey: `user:${identity}`,
+    dataDir: path.join(baseDir, "users", safePathSegment(identity)),
+    isolated: true,
+  };
+}
 
 // ============================
 // Console logger (for standalone gateway — no OpenClaw logger available)
@@ -100,6 +139,7 @@ export class TdaiGateway {
   private config: GatewayConfig;
   private logger: Logger;
   private core: TdaiCore;
+  private readonly scopedCores = new Map<string, Promise<TdaiCore>>();
   private server: http.Server | null = null;
   private startTime = Date.now();
 
@@ -121,6 +161,7 @@ export class TdaiGateway {
       config: this.config.memory,
       sessionFilter: new SessionFilter(this.config.memory.capture.excludeAgents),
     });
+    this.scopedCores.set("legacy", Promise.resolve(this.core));
   }
 
   /**
@@ -160,7 +201,17 @@ export class TdaiGateway {
       });
     }
 
-    await this.core.destroy();
+    const corePromises = [...this.scopedCores.values()];
+    const settled = await Promise.allSettled(corePromises);
+    const cores = new Set<TdaiCore>([this.core]);
+    for (const item of settled) {
+      if (item.status === "fulfilled") cores.add(item.value);
+    }
+    for (const core of cores) {
+      await core.destroy();
+    }
+    this.scopedCores.clear();
+    this.scopedCores.set("legacy", Promise.resolve(this.core));
     this.logger.info("Gateway stopped");
   }
 
@@ -236,7 +287,8 @@ export class TdaiGateway {
     }
 
     const startMs = Date.now();
-    const result = await this.core.handleBeforeRecall(body.query, body.session_key);
+    const core = await this.getCoreForUser(body.user_id);
+    const result = await core.handleBeforeRecall(body.query, body.session_key);
     const elapsed = Date.now() - startMs;
 
     this.logger.info(`Recall completed in ${elapsed}ms: context=${(result.appendSystemContext?.length ?? 0)} chars`);
@@ -258,7 +310,8 @@ export class TdaiGateway {
     }
 
     const startMs = Date.now();
-    const result = await this.core.handleTurnCommitted({
+    const core = await this.getCoreForUser(body.user_id);
+    const result = await core.handleTurnCommitted({
       userText: body.user_content,
       assistantText: body.assistant_content,
       messages: body.messages ?? [
@@ -287,7 +340,8 @@ export class TdaiGateway {
       return;
     }
 
-    const result = await this.core.searchMemories({
+    const core = await this.getCoreForUser(body.user_id);
+    const result = await core.searchMemories({
       query: body.query,
       limit: body.limit,
       type: body.type,
@@ -310,7 +364,8 @@ export class TdaiGateway {
       return;
     }
 
-    const result = await this.core.searchConversations({
+    const core = await this.getCoreForUser(body.user_id);
+    const result = await core.searchConversations({
       query: body.query,
       limit: body.limit,
       sessionKey: body.session_key,
@@ -331,7 +386,8 @@ export class TdaiGateway {
       return;
     }
 
-    await this.core.handleSessionEnd(body.session_key);
+    const core = await this.getCoreForUser(body.user_id);
+    await core.handleSessionEnd(body.session_key);
 
     const response: SessionEndResponse = { flushed: true };
     sendJson(res, 200, response);
@@ -375,7 +431,8 @@ export class TdaiGateway {
     const ts =
       `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
       `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const outputDir = `${this.config.data.baseDir}/seed-${ts}`;
+    const userScope = resolveGatewayUserScope(this.config.data.baseDir, body.user_id);
+    const outputDir = path.join(userScope.dataDir, `seed-${ts}`);
 
     // Merge config overrides if provided
     // Start with the base memory config + inject llm config from gateway settings
@@ -433,6 +490,42 @@ export class TdaiGateway {
       output_dir: summary.outputDir,
     };
     sendJson(res, 200, response);
+  }
+
+  private async getCoreForUser(userId?: string): Promise<TdaiCore> {
+    const scope = resolveGatewayUserScope(this.config.data.baseDir, userId);
+    if (!scope.isolated) return this.core;
+
+    const existing = this.scopedCores.get(scope.cacheKey);
+    if (existing) return existing;
+
+    const corePromise = this.createScopedCore(scope.dataDir).catch((err) => {
+      this.scopedCores.delete(scope.cacheKey);
+      throw err;
+    });
+    this.scopedCores.set(scope.cacheKey, corePromise);
+    return corePromise;
+  }
+
+  private async createScopedCore(dataDir: string): Promise<TdaiCore> {
+    initDataDirectories(dataDir);
+
+    const adapter = new StandaloneHostAdapter({
+      dataDir,
+      llmConfig: this.config.llm,
+      logger: this.logger,
+      platform: "gateway",
+    });
+
+    const core = new TdaiCore({
+      hostAdapter: adapter,
+      config: this.config.memory,
+      sessionFilter: new SessionFilter(this.config.memory.capture.excludeAgents),
+    });
+
+    await core.initialize();
+    this.logger.info(`Gateway user scope initialized: ${dataDir}`);
+    return core;
   }
 }
 

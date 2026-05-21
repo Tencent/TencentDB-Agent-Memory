@@ -68,6 +68,7 @@ export interface MemorySearchRequest {
   limit?: number;
   type?: string;
   scene?: string;
+  user_id?: string;
 }
 
 export interface MemorySearchResponse {
@@ -84,6 +85,7 @@ export interface ConversationSearchRequest {
   query: string;
   limit?: number;
   session_key?: string;
+  user_id?: string;
 }
 
 export interface ConversationSearchResponse {
@@ -125,6 +127,8 @@ export interface SeedRequest {
   data: unknown;
   /** Fallback session key when input sessions lack one. */
   session_key?: string;
+  /** Optional user identity used to route seeded data into an isolated gateway data scope. */
+  user_id?: string;
   /** Require each round to have both user and assistant messages. */
   strict_round_role?: boolean;
   /** Auto-fill missing timestamps (default: true). */
