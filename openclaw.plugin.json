@@ -81,7 +81,7 @@
         "description": "向量搜索 (Embedding) 配置",
         "properties": {
           "enabled": { "type": "boolean", "default": true, "description": "是否启用向量搜索（若 provider=none，则实际会被禁用）" },
-          "provider": { "type": "string", "default": "none", "description": "Embedding 服务提供者：填写兼容 OpenAI API 的远端服务名称（如 openai、deepseek 等）；不填或填 none 则禁用向量搜索" },
+          "provider": { "type": "string", "default": "none", "description": "Embedding 服务提供者：填写远端服务名称（如 openai、deepseek、zeroentropy、qclaw 等）；zeroentropy 使用原生 /v1/models/embed 接口，其余默认按 OpenAI 兼容接口调用；不填或填 none 则禁用向量搜索" },
           "proxyUrl": { "type": "string", "description": "本地代理地址（仅 provider=qclaw 时必填）。配置后 embedding 请求将通过该代理转发，原始 baseUrl 作为 Remote-URL 头传递" },
           "baseUrl": { "type": "string", "description": "API Base URL（必填）：填写对应 provider 的 API 地址" },
           "apiKey": { "type": "string", "description": "API Key（必填）" },

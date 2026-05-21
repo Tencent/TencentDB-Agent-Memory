@@ -1,8 +1,9 @@
 /**
  * Embedding Service: converts text to vector embeddings.
  *
- * Supports two providers:
- * - "openai": OpenAI-compatible embedding APIs (OpenAI, Azure OpenAI, self-hosted)
+ * Supports embedding providers:
+ * - OpenAI-compatible APIs (OpenAI, Azure OpenAI, DeepSeek, self-hosted)
+ * - "zeroentropy": ZeroEntropy native /v1/models/embed API
  * - "local": node-llama-cpp with embeddinggemma-300m GGUF model (fully offline)
  *
  * When no remote embedding is configured, automatically falls back to local provider.
@@ -18,7 +19,7 @@
 // ============================
 
 export interface OpenAIEmbeddingConfig {
-  /** Provider identifier — any value other than "local" (e.g. "openai", "deepseek", "azure", "qclaw") */
+  /** Provider identifier — any value other than "local" (e.g. "openai", "deepseek", "zeroentropy", "qclaw") */
   provider: string;
   /** API base URL (required — must be specified by user, e.g. "https://api.openai.com/v1") */
   baseUrl: string;
@@ -401,6 +402,12 @@ interface OpenAIEmbeddingResponse {
   };
 }
 
+interface ZeroEntropyEmbeddingResponse {
+  results: Array<{
+    embedding: number[];
+  }>;
+}
+
 export class OpenAIEmbeddingService implements EmbeddingService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -494,21 +501,29 @@ export class OpenAIEmbeddingService implements EmbeddingService {
   }
 
   private async _callApi(texts: string[], timeoutOverride?: number): Promise<Float32Array[]> {
-    const body: Record<string, unknown> = {
-      input: texts,
-      model: this.model,
-      dimensions: this.dims,
-    };
+    const isZeroEntropy = this.providerName.toLowerCase() === "zeroentropy";
+    const body: Record<string, unknown> = isZeroEntropy
+      ? {
+          input: texts,
+          input_type: "query",
+          model: this.model,
+        }
+      : {
+          input: texts,
+          model: this.model,
+          dimensions: this.dims,
+        };
 
     // Determine fetch URL and headers based on proxy mode
     const useProxy = this.providerName === "qclaw" && !!this.proxyUrl;
-    const fetchUrl = useProxy ? this.proxyUrl! : `${this.baseUrl}/embeddings`;
+    const remoteUrl = isZeroEntropy ? `${this.baseUrl}/v1/models/embed` : `${this.baseUrl}/embeddings`;
+    const fetchUrl = useProxy ? this.proxyUrl! : remoteUrl;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
     };
     if (useProxy) {
-      headers["Remote-URL"] = `${this.baseUrl}/embeddings`;
+      headers["Remote-URL"] = remoteUrl;
       this.logger?.debug?.(
         `${TAG} [qclaw-proxy] Forwarding embedding request via proxy: ${fetchUrl}, Remote-URL: ${headers["Remote-URL"]}`,
       );
@@ -543,14 +558,23 @@ export class OpenAIEmbeddingService implements EmbeddingService {
             continue;
           }
 
-          const json = (await resp.json()) as OpenAIEmbeddingResponse;
+          const json = await resp.json() as OpenAIEmbeddingResponse | ZeroEntropyEmbeddingResponse;
 
-          if (!json.data || !Array.isArray(json.data)) {
+          if (isZeroEntropy) {
+            const zeJson = json as ZeroEntropyEmbeddingResponse;
+            if (!zeJson.results || !Array.isArray(zeJson.results)) {
+              throw new Error("ZeroEntropy embedding API returned unexpected format: missing 'results' array");
+            }
+            return zeJson.results.map((d) => sanitizeAndNormalize(d.embedding));
+          }
+
+          const openAiJson = json as OpenAIEmbeddingResponse;
+          if (!openAiJson.data || !Array.isArray(openAiJson.data)) {
             throw new Error("Embedding API returned unexpected format: missing 'data' array");
           }
 
           // Sort by index to ensure correct order, then sanitize+normalize for consistency with local provider
-          const sorted = [...json.data].sort((a, b) => a.index - b.index);
+          const sorted = [...openAiJson.data].sort((a, b) => a.index - b.index);
           return sorted.map((d) => sanitizeAndNormalize(d.embedding));
         } finally {
           clearTimeout(timeoutId);
@@ -582,7 +606,7 @@ export class OpenAIEmbeddingService implements EmbeddingService {
  * Create an EmbeddingService from config.
  *
  * Strategy:
- * - If config has provider != "local" with valid apiKey, model, and dimensions → use remote OpenAI-compatible embedding
+ * - If config has provider != "local" with valid apiKey, model, and dimensions → use remote embedding
  * - If config has provider="local" → use node-llama-cpp local embedding
  * - If config is undefined or missing required fields → fall back to local embedding
  *
@@ -595,7 +619,7 @@ export function createEmbeddingService(
   config: EmbeddingConfig | undefined,
   logger?: Logger,
 ): EmbeddingService {
-  // Remote OpenAI-compatible provider: any provider value other than "local"
+  // Remote provider: any provider value other than "local"
   if (config && config.provider !== "local" && "apiKey" in config && config.apiKey) {
     logger?.debug?.(`${TAG} Using remote embedding (provider=${config.provider}, model=${config.model})`);
     return new OpenAIEmbeddingService(config as OpenAIEmbeddingConfig, logger);

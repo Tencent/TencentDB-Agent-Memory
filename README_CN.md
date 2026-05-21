@@ -250,6 +250,43 @@ docker exec -it hermes-memory hermes
 
 ---
 
+### 3. 接入已有 Hermes Agent
+
+如果机器上已经安装了 Hermes，不需要改用 Docker 镜像，可以把 `memory_tencentdb` provider 安装到现有 Hermes。安装脚本默认查找 `~/.hermes/hermes-agent`；如果用 root 给其他用户安装，请传 `INSTALL_AS_USER=<user>`。
+
+```bash
+# 先全局下载 npm 包，拿到安装脚本。
+npm install -g @tencentdb-agent-memory/memory-tencentdb
+
+# 将 memory_tencentdb 链接到现有 Hermes 插件目录。
+INSTALL_SCRIPT="$(npm root -g)/@tencentdb-agent-memory/memory-tencentdb/scripts/install_hermes_memory_tencentdb.sh"
+bash "$INSTALL_SCRIPT"
+
+# 配置 Hermes provider 背后的 Gateway。
+CTL="$HOME/.memory-tencentdb/tdai-memory-openclaw-plugin/scripts/memory-tencentdb-ctl.sh"
+bash "$CTL" --hermes config llm \
+  --api-key "sk-..." \
+  --base-url "https://api.openai.com/v1" \
+  --model "gpt-4o"
+
+# 可选：开启远程 embedding。ZeroEntropy 会走原生 embed API。
+bash "$CTL" --hermes config embedding \
+  --provider zeroentropy \
+  --api-key "$ZEROENTROPY_API_KEY" \
+  --base-url "https://api.zeroentropy.dev" \
+  --model "zembed-1" \
+  --dimensions 2560 \
+  --restart
+
+# 启用 Hermes memory provider，并验证 Gateway。
+bash "$CTL" --hermes enable-hermes-memory
+curl http://127.0.0.1:8420/health
+```
+
+如果使用 OpenAI 兼容的 embedding provider，同样执行 `config embedding`，把 `--provider` 换成 `openai` 或对应 provider 名称，并填写兼容 OpenAI 的 `--base-url`、模型名和维度。
+
+---
+
 ## 🔧 可调参数
 
 **所有字段均有合理默认值，零配置即可跑。** 如果要调优，可以按使用深度逐层展开。
@@ -293,7 +330,7 @@ docker exec -it hermes-memory hermes
 
 完整字段、类型、约束见 [`openclaw.plugin.json`](./openclaw.plugin.json) 。
 
-- `embedding.*` — 远程 embedding 服务（OpenAI 兼容 API）
+- `embedding.*` — 远程 embedding 服务（OpenAI 兼容 API 或 ZeroEntropy 原生 API）
 - `llm.*` — 独立 LLM 模式（绕过 OpenClaw 内置模型，用指定 API 跑 L1/L2/L3）
 - `offload.backendUrl / backendApiKey` — 将 L1/L1.5/L2/L4 offload 流程卸载到后端服务
 - `report.*` — 指标上报
