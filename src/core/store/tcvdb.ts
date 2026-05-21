@@ -424,7 +424,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
       timestamp_end: tsEnd,
       created_time_ms: isoToEpochMs(record.createdAt),
       updated_time_ms: isoToEpochMs(record.updatedAt),
-      metadata_json: JSON.stringify(record.metadata),
+      metadata_json: JSON.stringify({ ...record.metadata, scope: record.scope }),
     };
 
     // BM25 sparse vector (if sidecar available)
@@ -469,7 +469,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
           timestamp_end: tsEnd,
           created_time_ms: isoToEpochMs(record.createdAt),
           updated_time_ms: isoToEpochMs(record.updatedAt),
-          metadata_json: JSON.stringify(record.metadata),
+          metadata_json: JSON.stringify({ ...record.metadata, scope: record.scope }),
         };
 
         if (this.bm25Encoder) {

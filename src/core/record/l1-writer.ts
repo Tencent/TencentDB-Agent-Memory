@@ -29,11 +29,17 @@ import type { EmbeddingService } from "../store/embedding.js";
 /** v3: 3 memory types aligned with Kenty's extraction prompt */
 export type MemoryType = "persona" | "episodic" | "instruction";
 
+/** Scope where a memory should be applied. */
+export type MemoryScope = "global" | "project" | "session";
+
 /** Metadata for episodic memories (activity time range) */
 export interface EpisodicMetadata {
   activity_start_time?: string; // ISO 8601
   activity_end_time?: string; // ISO 8601
 }
+
+/** Flexible persisted metadata object. */
+export type MemoryMetadata = Record<string, unknown>;
 
 /**
  * A persisted memory record in L1 JSONL files.
@@ -51,6 +57,8 @@ export interface MemoryRecord {
   content: string;
   /** Memory type: persona / episodic / instruction */
   type: MemoryType;
+  /** Application scope: global / project / session */
+  scope: MemoryScope;
   /** Priority score: 0-100 (higher = more important), -1 = strict global instruction */
   priority: number;
   /** Scene name this memory belongs to */
@@ -58,7 +66,7 @@ export interface MemoryRecord {
   /** Source message IDs that contributed to this memory */
   source_message_ids: string[];
   /** Type-specific metadata (e.g., activity_start_time for episodic) */
-  metadata: EpisodicMetadata | Record<string, never>;
+  metadata: MemoryMetadata;
   /** Timestamp trail: all timestamps related to this memory (for merge history tracking) */
   timestamps: string[];
   /** Creation timestamp (ISO) */
@@ -78,9 +86,10 @@ export interface MemoryRecord {
 export interface ExtractedMemory {
   content: string;
   type: MemoryType;
+  scope: MemoryScope;
   priority: number;
   source_message_ids: string[];
-  metadata: EpisodicMetadata | Record<string, never>;
+  metadata: MemoryMetadata;
   /** Scene name this memory was extracted in */
   scene_name: string;
 }
@@ -130,6 +139,15 @@ export function generateMemoryId(): string {
   return `m_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 }
 
+export function normalizeMemoryScope(raw: unknown): MemoryScope | null {
+  if (typeof raw !== "string") return null;
+  const lower = raw.toLowerCase().trim();
+  if (lower === "global" || lower === "project" || lower === "session") {
+    return lower;
+  }
+  return null;
+}
+
 /**
  * Write a memory record according to the dedup decision.
  *
@@ -165,18 +183,21 @@ export async function writeMemory(params: {
   // Determine final content, type, priority based on action
   let finalContent: string;
   let finalType: MemoryType;
+  let finalScope: MemoryScope;
   let finalPriority: number;
   let finalTimestamps: string[];
 
   if (decision.action === "merge" || decision.action === "update") {
     finalContent = decision.merged_content ?? memory.content;
     finalType = decision.merged_type ?? memory.type;
+    finalScope = memory.scope;
     finalPriority = decision.merged_priority ?? memory.priority;
     finalTimestamps = decision.merged_timestamps ?? [now];
   } else {
     // store
     finalContent = memory.content;
     finalType = memory.type;
+    finalScope = memory.scope;
     finalPriority = memory.priority;
     finalTimestamps = [now];
   }
@@ -185,6 +206,7 @@ export async function writeMemory(params: {
     id: decision.record_id || generateMemoryId(),
     content: finalContent,
     type: finalType,
+    scope: finalScope,
     priority: finalPriority,
     scene_name: memory.scene_name,
     source_message_ids: memory.source_message_ids,

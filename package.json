@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./dist/index.mjs",
   "bin": {
+    "memory-tdai": "./bin/memory-tdai.mjs",
     "migrate-sqlite-to-tcvdb": "./bin/migrate-sqlite-to-tcvdb.mjs",
     "export-tencent-vdb": "./bin/export-tencent-vdb.mjs",
     "read-local-memory": "./bin/read-local-memory.mjs"
@@ -34,14 +35,12 @@
   "files": [
     "dist/",
     "bin/",
-    "index.ts",
     "scripts/migrate-sqlite-to-tcvdb/dist/",
     "scripts/export-tencent-vdb/dist/",
     "scripts/read-local-memory/dist/",
     "scripts/memory-tencentdb-ctl.sh",
     "scripts/install_hermes_memory_tencentdb.sh",
     "scripts/README.memory-tencentdb-ctl.md",
-    "src/",
     "scripts/openclaw-after-tool-call-messages.patch.sh",
     "scripts/setup-offload.sh",
     "hermes-plugin/",
@@ -77,6 +76,7 @@
     "@node-rs/jieba": "^2.0.1",
     "@tencentdb-agent-memory/tcvdb-text": "^0.1.1",
     "ai": "^6.0.164",
+    "commander": "^14.0.3",
     "js-tiktoken": "^1.0.18",
     "json5": "^2.2.3",
     "sqlite-vec": "0.1.7-alpha.2",
@@ -102,7 +102,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.mjs"
     ],
     "compat": {
       "pluginApi": ">=2026.3.13",

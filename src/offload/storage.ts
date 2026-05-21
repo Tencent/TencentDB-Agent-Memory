@@ -162,27 +162,45 @@ export async function listRegisteredSessions(
 // ─── JSONL Defense Layer ─────────────────────────────────────────────────────
 
 const UNSAFE_CHAR_RE =
-  /[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F\u0080-\u009F\uD800-\uDFFF\u200B-\u200F\u2028\u2029\uFEFF]/gu;
+  /[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F\u0080-\u009F\u200B-\u200F\u2028\u2029\uFEFF]/g;
+
+function stripUnsafeCharacters(text: string): string {
+  const withoutUnsafe = text.replace(UNSAFE_CHAR_RE, "");
+  let out = "";
+  for (let i = 0; i < withoutUnsafe.length; i++) {
+    const code = withoutUnsafe.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = withoutUnsafe.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        out += withoutUnsafe[i] + withoutUnsafe[i + 1];
+        i++;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      continue;
+    }
+    out += withoutUnsafe[i];
+  }
+  return out;
+}
 
 /** Layer 0 — Source text sanitize. Strips unsafe characters from arbitrary text. */
 export function sanitizeText(text: string): string {
   if (typeof text !== "string") return text;
-  return text.replace(UNSAFE_CHAR_RE, "");
+  return stripUnsafeCharacters(text);
 }
 
 /** Layer 1 — Write sanitize. Strips unsafe characters from a JSON string with roundtrip verification. */
 export function sanitizeJsonLine(jsonStr: string): string {
-  let cleaned = jsonStr.replace(UNSAFE_CHAR_RE, "");
+  let cleaned = stripUnsafeCharacters(jsonStr);
   try {
     JSON.parse(cleaned);
     return cleaned;
   } catch {
     /* fall through */
   }
-  cleaned = jsonStr.replace(
-    /[^\x09\x0A\x0D\x20-\x7E\u00A0-\u024F\u3400-\u4DBF\u4E00-\u9FFF\uFF00-\uFFEF]/g,
-    "",
-  );
+  cleaned = stripUnsafeCharacters(jsonStr.replace(/[\u0000-\u001F]/g, ""));
   try {
     JSON.parse(cleaned);
     return cleaned;
@@ -190,7 +208,7 @@ export function sanitizeJsonLine(jsonStr: string): string {
     /* fall through */
   }
   try {
-    const obj = JSON.parse(jsonStr.replace(/[^\x20-\x7E\t\n\r]/g, ""));
+    const obj = JSON.parse(stripUnsafeCharacters(jsonStr));
     return JSON.stringify(obj);
   } catch {
     return "{}";

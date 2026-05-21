@@ -81,6 +81,8 @@ export interface LLMRunParams {
   workspaceDir?: string;
   /** Plugin instance ID for metric reporting (optional). */
   instanceId?: string;
+  /** Provider-specific options passed through to the LLM provider. */
+  providerOptions?: Record<string, unknown>;
 }
 
 /**
@@ -153,7 +155,7 @@ export interface LLMRunnerFactory {
  */
 export interface HostAdapter {
   /** Identifies the host type for conditional behavior (should be rare). */
-  readonly hostType: "openclaw" | "hermes" | "standalone";
+  readonly hostType: "openclaw" | "hermes" | "standalone" | "codex" | "opencode" | "deepagent";
 
   /** Get the unified runtime context for the current session. */
   getRuntimeContext(): RuntimeContext;
@@ -164,6 +166,57 @@ export interface HostAdapter {
   /** Get the LLM runner factory configured for this host. */
   getLLMRunnerFactory(): LLMRunnerFactory;
 }
+
+export interface HostCapabilities {
+  asyncHooks: boolean;
+  transcriptFormat:
+    | "openclaw-messages"
+    | "hermes-provider"
+    | "gateway-http"
+    | "codex-jsonl"
+    | "opencode";
+  automaticRecall: boolean;
+  automaticCapture: boolean;
+}
+
+export const DEFAULT_HOST_CAPABILITIES: Record<string, HostCapabilities> = {
+  openclaw: {
+    asyncHooks: true,
+    transcriptFormat: "openclaw-messages",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+  hermes: {
+    asyncHooks: false,
+    transcriptFormat: "hermes-provider",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+  standalone: {
+    asyncHooks: false,
+    transcriptFormat: "gateway-http",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+  codex: {
+    asyncHooks: false,
+    transcriptFormat: "codex-jsonl",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+  opencode: {
+    asyncHooks: false,
+    transcriptFormat: "opencode",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+  deepagent: {
+    asyncHooks: false,
+    transcriptFormat: "gateway-http",
+    automaticRecall: true,
+    automaticCapture: true,
+  },
+};
 
 // ============================
 // CompletedTurn — represents a finished conversation turn

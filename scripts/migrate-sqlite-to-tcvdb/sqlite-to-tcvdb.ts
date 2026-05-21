@@ -297,20 +297,35 @@ function compactTimestamps(row: L1RecordRow): string[] {
 function mapL1RowToMemoryRecord(row: L1RecordRow): MemoryRecord {
   const timestamps = compactTimestamps(row);
   const fallbackIso = row.updated_time || row.created_time || row.timestamp_end || row.timestamp_str || new Date(0).toISOString();
+  const metadata = safeParseMetadata(row.metadata_json);
   return {
     id: row.record_id,
     content: row.content,
     type: row.type as MemoryRecord["type"],
+    scope: normalizeScope(metadata.scope, row.content, row.type as MemoryRecord["type"]),
     priority: row.priority,
     scene_name: row.scene_name,
     source_message_ids: [],
-    metadata: safeParseMetadata(row.metadata_json),
+    metadata,
     timestamps,
     createdAt: row.created_time || fallbackIso,
     updatedAt: row.updated_time || row.created_time || fallbackIso,
     sessionKey: row.session_key || "",
     sessionId: row.session_id || "",
   };
+}
+
+function normalizeScope(raw: unknown, content: string, type: MemoryRecord["type"]): MemoryRecord["scope"] {
+  if (raw === "global" || raw === "project" || raw === "session") {
+    return raw;
+  }
+  if (/(这个项目|本项目|当前项目|当前仓库|这个仓库|工作区|PR|issue|腾讯这个项目)/i.test(content)) {
+    return "project";
+  }
+  if (/(这次|本次|当前任务|本轮|临时|今天刚提|刚刚)/i.test(content)) {
+    return "session";
+  }
+  return type === "episodic" ? "session" : "global";
 }
 
 function mapL0RowToRecord(row: L0RecordRow): L0Record {

@@ -375,7 +375,7 @@ async function searchMemories(
     // Hybrid: if the store natively supports hybrid search (e.g. TCVDB does
     // server-side dense + sparse + RRF in a single API call), short-circuit
     // to avoid a redundant second HTTP request and a wasted local embed().
-    if (vectorStore?.getCapabilities().nativeHybridSearch) {
+    if (vectorStore?.getCapabilities().nativeHybridSearch && vectorStore.searchL1Hybrid) {
       const tNative = performance.now();
       const results = await vectorStore.searchL1Hybrid({ query: cleanText, topK: maxResults });
       const nativeMs = performance.now() - tNative;
@@ -535,23 +535,27 @@ async function searchHybrid(
             if (ftsResults.length > 0) {
               logger?.debug?.(`${TAG} [hybrid-keyword-fts] FTS5 found ${ftsResults.length} candidates`);
               // Convert FtsSearchResult to ScoredRecord for RRF merge
-              const records = ftsResults.map((r): ScoredRecord => ({
-                record: {
-                  id: r.record_id,
-                  content: r.content,
-                  type: r.type as MemoryRecord["type"],
-                  priority: r.priority,
-                  scene_name: r.scene_name,
-                  source_message_ids: [],
-                  metadata: r.metadata_json ? (() => { try { return JSON.parse(r.metadata_json); } catch { return {}; } })() : {},
-                  timestamps: [r.timestamp_str].filter(Boolean),
-                  createdAt: "",
-                  updatedAt: "",
-                  sessionKey: r.session_key,
-                  sessionId: r.session_id,
-                },
-                score: r.score,
-              }));
+              const records = ftsResults.map((r): ScoredRecord => {
+                const metadata = parseMetadataJson(r.metadata_json);
+                return {
+                  record: {
+                    id: r.record_id,
+                    content: r.content,
+                    type: r.type as MemoryRecord["type"],
+                    scope: normalizeScope(metadata.scope, r.content, r.type as MemoryRecord["type"]),
+                    priority: r.priority,
+                    scene_name: r.scene_name,
+                    source_message_ids: [],
+                    metadata,
+                    timestamps: [r.timestamp_str].filter(Boolean),
+                    createdAt: "",
+                    updatedAt: "",
+                    sessionKey: r.session_key,
+                    sessionId: r.session_id,
+                  },
+                  score: r.score,
+                };
+              });
               return { records, ms: performance.now() - tStart };
             }
           }
@@ -787,4 +791,29 @@ function ftsResultToFormatable(r: L1FtsResult): FormatableMemory {
     activity_end_time: activityEnd,
     timestamp: r.timestamp_str || undefined,
   };
+}
+
+function parseMetadataJson(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeScope(raw: unknown, content: string, type: MemoryRecord["type"]): MemoryRecord["scope"] {
+  if (raw === "global" || raw === "project" || raw === "session") {
+    return raw;
+  }
+  if (/(这个项目|本项目|当前项目|当前仓库|这个仓库|工作区|PR|issue|腾讯这个项目)/i.test(content)) {
+    return "project";
+  }
+  if (/(这次|本次|当前任务|本轮|临时|今天刚提|刚刚)/i.test(content)) {
+    return "session";
+  }
+  return type === "episodic" ? "session" : "global";
 }

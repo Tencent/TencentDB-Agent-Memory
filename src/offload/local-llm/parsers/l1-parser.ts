@@ -31,6 +31,7 @@ export function parseL1Response(raw: string): OffloadEntry[] {
       tool_call_id: toolCallId,
       tool_call: item.tool_call ?? "",
       summary: item.summary ?? "",
+      result_ref: "",
       timestamp: item.timestamp ?? "",
       score: typeof item.score === "number" ? item.score : 5,
       node_id: null,

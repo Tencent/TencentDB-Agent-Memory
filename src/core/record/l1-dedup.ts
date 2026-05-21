@@ -233,20 +233,24 @@ async function findCandidatesByVector(
     const candidates: MemoryRecord[] = searchResults
       .filter((r) => !newRecordIds.has(r.record_id))
       .slice(0, topK)
-      .map((r) => ({
-        id: r.record_id,
-        content: r.content,
-        type: r.type as MemoryRecord["type"],
-        priority: r.priority,
-        scene_name: r.scene_name,
-        source_message_ids: [],
-        metadata: {},
-        timestamps: [r.timestamp_str].filter(Boolean),
-        createdAt: "",
-        updatedAt: "",
-        sessionKey: r.session_key,
-        sessionId: r.session_id,
-      }));
+      .map((r) => {
+        const metadata = parseMetadataJson(r.metadata_json);
+        return {
+          id: r.record_id,
+          content: r.content,
+          type: r.type as MemoryRecord["type"],
+          scope: normalizeScope(metadata.scope, r.content, r.type as MemoryRecord["type"]),
+          priority: r.priority,
+          scene_name: r.scene_name,
+          source_message_ids: [],
+          metadata,
+          timestamps: [r.timestamp_str].filter(Boolean),
+          createdAt: "",
+          updatedAt: "",
+          sessionKey: r.session_key,
+          sessionId: r.session_id,
+        };
+      });
 
     matches.push({ newMemory: mem, candidates });
   }
@@ -279,20 +283,24 @@ async function findCandidatesByFts(
       const candidates: MemoryRecord[] = ftsResults
         .filter((r) => !newRecordIds.has(r.record_id))
         .slice(0, 5)
-        .map((r) => ({
-          id: r.record_id,
-          content: r.content,
-          type: r.type as MemoryRecord["type"],
-          priority: r.priority,
-          scene_name: r.scene_name,
-          source_message_ids: [],
-          metadata: r.metadata_json ? (() => { try { return JSON.parse(r.metadata_json); } catch { return {}; } })() : {},
-          timestamps: [r.timestamp_str].filter(Boolean),
-          createdAt: "",
-          updatedAt: "",
-          sessionKey: r.session_key,
-          sessionId: r.session_id,
-        }));
+        .map((r) => {
+          const metadata = parseMetadataJson(r.metadata_json);
+          return {
+            id: r.record_id,
+            content: r.content,
+            type: r.type as MemoryRecord["type"],
+            scope: normalizeScope(metadata.scope, r.content, r.type as MemoryRecord["type"]),
+            priority: r.priority,
+            scene_name: r.scene_name,
+            source_message_ids: [],
+            metadata,
+            timestamps: [r.timestamp_str].filter(Boolean),
+            createdAt: "",
+            updatedAt: "",
+            sessionKey: r.session_key,
+            sessionId: r.session_id,
+          };
+        });
       matches.push({ newMemory: mem, candidates });
     } else {
       matches.push({ newMemory: mem, candidates: [] });
@@ -402,4 +410,29 @@ function fallbackStoreAll(memories: Array<ExtractedMemory & { record_id: string 
     action: "store" as const,
     target_ids: [],
   }));
+}
+
+function parseMetadataJson(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeScope(raw: unknown, content: string, type: MemoryRecord["type"]): MemoryRecord["scope"] {
+  if (raw === "global" || raw === "project" || raw === "session") {
+    return raw;
+  }
+  if (/(这个项目|本项目|当前项目|当前仓库|这个仓库|工作区|PR|issue|腾讯这个项目)/i.test(content)) {
+    return "project";
+  }
+  if (/(这次|本次|当前任务|本轮|临时|今天刚提|刚刚)/i.test(content)) {
+    return "session";
+  }
+  return type === "episodic" ? "session" : "global";
 }

@@ -15,8 +15,8 @@
 import type { ConversationMessage } from "../conversation/l0-recorder.js";
 import { EXTRACT_MEMORIES_SYSTEM_PROMPT, formatExtractionPrompt } from "../prompts/l1-extraction.js";
 import { batchDedup } from "./l1-dedup.js";
-import { writeMemory, generateMemoryId } from "./l1-writer.js";
-import type { ExtractedMemory, MemoryRecord, MemoryType, DedupDecision } from "./l1-writer.js";
+import { writeMemory, generateMemoryId, normalizeMemoryScope } from "./l1-writer.js";
+import type { ExtractedMemory, MemoryRecord, MemoryType, DedupDecision, MemoryScope } from "./l1-writer.js";
 import { CleanContextRunner } from "../../utils/clean-context-runner.js";
 import { sanitizeJsonForParse, shouldExtractL1 } from "../../utils/sanitize.js";
 import type { IMemoryStore } from "../store/types.js";
@@ -44,6 +44,7 @@ interface SceneSegment {
   memories: Array<{
     content: string;
     type: string;
+    scope?: string;
     priority: number;
     source_message_ids: string[];
     metadata: Record<string, unknown>;
@@ -188,6 +189,7 @@ export async function extractL1Memories(params: {
       allExtracted.push({
         content: mem.content,
         type: memType,
+        scope: normalizeMemoryScope(mem.scope) ?? inferMemoryScope(mem.scope, mem.content, memType),
         priority: typeof mem.priority === "number" ? mem.priority : 50,
         source_message_ids: Array.isArray(mem.source_message_ids) ? mem.source_message_ids : [],
         metadata: mem.metadata ?? {},
@@ -274,6 +276,7 @@ export async function extractL1Memories(params: {
       memoriesStoredContent: storedRecords.map((r) => ({
         content: r.content,
         type: r.type,
+        scope: r.scope,
         scene: r.scene_name ?? null,
       })),
       memoriesByType,
@@ -400,6 +403,7 @@ function parseExtractionResult(raw: string, logger?: Logger): SceneSegment[] {
               .map((m) => ({
                 content: String(m.content),
                 type: String(m.type ?? "episodic"),
+                scope: typeof m.scope === "string" ? m.scope : undefined,
                 priority: typeof m.priority === "number" ? m.priority : 50,
                 source_message_ids: Array.isArray(m.source_message_ids) ? m.source_message_ids.map(String) : [],
                 metadata: (m.metadata && typeof m.metadata === "object" ? m.metadata : {}) as Record<string, unknown>,
@@ -532,4 +536,17 @@ function normalizeType(raw: string): MemoryType | null {
   if (lower === "instruct") return "instruction";
   if (lower === "preference") return "persona"; // fold preference into persona
   return null;
+}
+
+function inferMemoryScope(rawScope: unknown, content: string, type: MemoryType): MemoryScope {
+  const normalized = normalizeMemoryScope(rawScope);
+  if (normalized) return normalized;
+
+  if (/(这个项目|本项目|当前项目|当前仓库|这个仓库|工作区|PR|issue|腾讯这个项目)/i.test(content)) {
+    return "project";
+  }
+  if (/(这次|本次|当前任务|本轮|临时|今天刚提|刚刚)/i.test(content)) {
+    return "session";
+  }
+  return type === "episodic" ? "session" : "global";
 }

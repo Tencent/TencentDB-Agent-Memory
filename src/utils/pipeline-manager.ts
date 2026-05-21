@@ -126,6 +126,8 @@ export interface PipelineConfig {
   };
 
   l2: {
+    /** Whether L2 scene extraction is enabled. Default: true. */
+    enabled?: boolean;
     /**
      * Delay after L1 completes before triggering L2 (seconds, default: 90).
      * Allows remote L1 to finish generating records asynchronously.
@@ -143,6 +145,11 @@ export interface PipelineConfig {
      * Prevents wasting resources on abandoned sessions.
      */
     sessionActiveWindowHours: number;
+  };
+
+  l3?: {
+    /** Whether L3 persona generation is enabled. Default: true. */
+    enabled?: boolean;
   };
 }
 
@@ -198,6 +205,8 @@ export class MemoryPipelineManager {
   private readonly l1IdleTimeoutMs: number;
   private readonly everyNConversations: number;
   private readonly enableWarmup: boolean;
+  private readonly l2Enabled: boolean;
+  private readonly l3Enabled: boolean;
   private readonly l2DelayAfterL1Ms: number;
   private readonly l2MinIntervalMs: number;
   private readonly l2MaxIntervalMs: number;
@@ -255,6 +264,8 @@ export class MemoryPipelineManager {
     this.l1IdleTimeoutMs = config.l1.idleTimeoutSeconds * 1000;
     this.everyNConversations = config.everyNConversations;
     this.enableWarmup = config.enableWarmup;
+    this.l2Enabled = config.l2.enabled ?? true;
+    this.l3Enabled = config.l3?.enabled ?? true;
     this.l2DelayAfterL1Ms = config.l2.delayAfterL1Seconds * 1000;
     this.l2MinIntervalMs = config.l2.minIntervalSeconds * 1000;
     this.l2MaxIntervalMs = config.l2.maxIntervalSeconds * 1000;
@@ -265,6 +276,8 @@ export class MemoryPipelineManager {
     this.logger?.debug?.(
       `${TAG} Initialized: everyNConversations=${config.everyNConversations}, ` +
       `warmup=${config.enableWarmup ? "enabled" : "disabled"}, ` +
+      `l2=${this.l2Enabled ? "enabled" : "disabled"}, ` +
+      `l3=${this.l3Enabled ? "enabled" : "disabled"}, ` +
       `l1IdleTimeout=${config.l1.idleTimeoutSeconds}s, ` +
       `l2DelayAfterL1=${config.l2.delayAfterL1Seconds}s, ` +
       `l2MinInterval=${config.l2.minIntervalSeconds}s, ` +
@@ -580,6 +593,10 @@ export class MemoryPipelineManager {
     // Step 3: Flush all L2 schedule timers
     for (const [sessionKey, timers] of this.sessionTimers) {
       if (timers.l2Schedule.pending) {
+        if (!this.l2Enabled) {
+          timers.l2Schedule.cancel();
+          continue;
+        }
         this.logger?.debug?.(`${TAG} [${sessionKey}] Flush: triggering L2 schedule timer`);
         timers.l2Schedule.flush();
       }
@@ -690,7 +707,9 @@ export class MemoryPipelineManager {
       state.conversation_count = 0;
       this.advanceWarmupThreshold(state);
       await this.persistStates();
-      this.advanceL2Timer(sessionKey);
+      if (this.l2Enabled) {
+        this.advanceL2Timer(sessionKey);
+      }
       return;
     }
 
@@ -744,7 +763,9 @@ export class MemoryPipelineManager {
     await this.persistStates();
 
     // Advance the L2 timer (downward-only) to fire after delay, respecting minInterval
-    this.advanceL2Timer(sessionKey);
+    if (this.l2Enabled) {
+      this.advanceL2Timer(sessionKey);
+    }
   }
 
   // ============================
@@ -762,6 +783,10 @@ export class MemoryPipelineManager {
    */
   private advanceL2Timer(sessionKey: string): void {
     if (this.destroyed) return;
+    if (!this.l2Enabled) {
+      this.logger?.debug?.(`${TAG} [${sessionKey}] L2 timer not armed: L2 disabled`);
+      return;
+    }
 
     const timers = this.getOrCreateTimers(sessionKey);
     const now = Date.now();
@@ -796,6 +821,7 @@ export class MemoryPipelineManager {
    */
   private armL2MaxInterval(sessionKey: string): void {
     if (this.destroyed) return;
+    if (!this.l2Enabled) return;
 
     const timers = this.getOrCreateTimers(sessionKey);
     const fireAt = Date.now() + this.l2MaxIntervalMs;
@@ -819,6 +845,8 @@ export class MemoryPipelineManager {
    * - "max-interval": periodic timer — apply cold check normally.
    */
   private onL2TimerFired(sessionKey: string, source: "delay-after-l1" | "max-interval"): void {
+    if (!this.l2Enabled) return;
+
     const state = this.sessionStates.get(sessionKey);
     if (!state) return;
 
@@ -844,6 +872,11 @@ export class MemoryPipelineManager {
   // ============================
 
   private enqueueL2(sessionKey: string, trigger: string): void {
+    if (!this.l2Enabled) {
+      this.logger?.debug?.(`${TAG} [${sessionKey}] L2 enqueue skipped: L2 disabled (trigger=${trigger})`);
+      return;
+    }
+
     const timers = this.getOrCreateTimers(sessionKey);
 
     // Cancel any pending L2 timer (we're about to run L2)
@@ -895,7 +928,9 @@ export class MemoryPipelineManager {
         `${TAG} [${sessionKey}] L2 runner failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
       );
       // Even on failure, arm maxInterval so we retry eventually
-      this.armL2MaxInterval(sessionKey);
+      if (this.l2Enabled) {
+        this.armL2MaxInterval(sessionKey);
+      }
       return;
     }
 
@@ -907,7 +942,7 @@ export class MemoryPipelineManager {
     this.l2LastRunTime.set(sessionKey, now);
 
     // Advance cursor using the record timestamp returned by the runner
-    if (result?.latestCursor) {
+    if (result && result.latestCursor) {
       state.last_extraction_updated_time = result.latestCursor;
     }
 
@@ -919,7 +954,9 @@ export class MemoryPipelineManager {
     this.armL2MaxInterval(sessionKey);
 
     // Trigger L3
-    this.triggerL3();
+    if (this.l3Enabled) {
+      this.triggerL3();
+    }
   }
 
   // ============================
@@ -928,6 +965,10 @@ export class MemoryPipelineManager {
 
   private triggerL3(): void {
     if (this.destroyed) return;
+    if (!this.l3Enabled) {
+      this.logger?.debug?.(`${TAG} L3 trigger skipped: L3 disabled`);
+      return;
+    }
 
     if (this.l3Running) {
       // L3 is in progress — mark pending so it runs again after current finishes
@@ -956,7 +997,7 @@ export class MemoryPipelineManager {
       this.l3Running = false;
 
       // If new L2 completions happened while L3 was running, run again
-      if (this.l3Pending && !this.destroyed) {
+      if (this.l3Pending && !this.destroyed && this.l3Enabled) {
         this.logger?.debug?.(`${TAG} L3 has pending work, re-running`);
         this.enqueueL3();
       }
@@ -1109,7 +1150,9 @@ export class MemoryPipelineManager {
       state.conversation_count = 0;
 
       // Arm L2 timer with delay (gives the system time to fully start)
-      this.advanceL2Timer(sessionKey);
+      if (this.l2Enabled) {
+        this.advanceL2Timer(sessionKey);
+      }
     }
   }
 
@@ -1136,6 +1179,14 @@ export class MemoryPipelineManager {
   /** Whether the pipeline has been destroyed. */
   get isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  /** Enabled/disabled status for optional pipeline stages. */
+  getStageConfig(): { l2Enabled: boolean; l3Enabled: boolean } {
+    return {
+      l2Enabled: this.l2Enabled,
+      l3Enabled: this.l3Enabled,
+    };
   }
 
   /** Queue sizes and running state for monitoring. */

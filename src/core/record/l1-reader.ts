@@ -13,7 +13,8 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { MemoryRecord, MemoryType, EpisodicMetadata } from "./l1-writer.js";
+import { normalizeMemoryScope } from "./l1-writer.js";
+import type { MemoryRecord, MemoryType, EpisodicMetadata, MemoryScope } from "./l1-writer.js";
 import type { IMemoryStore, L1RecordRow, L1QueryFilter } from "../store/types.js";
 
 // Re-export types that readers need
@@ -62,9 +63,9 @@ export async function queryMemoryRecords(
  * Convert a raw SQLite L1RecordRow to a MemoryRecord (same shape as JSONL records).
  */
 function rowToMemoryRecord(row: L1RecordRow): MemoryRecord {
-  let metadata: EpisodicMetadata | Record<string, never> = {};
+  let metadata: Record<string, unknown> = {};
   try {
-    metadata = JSON.parse(row.metadata_json) as EpisodicMetadata | Record<string, never>;
+    metadata = JSON.parse(row.metadata_json) as Record<string, unknown>;
   } catch {
     // malformed JSON — use empty object
   }
@@ -81,6 +82,7 @@ function rowToMemoryRecord(row: L1RecordRow): MemoryRecord {
     id: row.record_id,
     content: row.content,
     type: row.type as MemoryType,
+    scope: normalizeRecordScope(metadata.scope, row.content, row.type as MemoryType),
     priority: row.priority,
     scene_name: row.scene_name,
     source_message_ids: [], // not stored in SQLite (vector search doesn't need them)
@@ -149,7 +151,7 @@ export async function readMemoryRecords(
         if (parsed.sessionKey !== sessionKey) {
           continue;
         }
-        records.push(parsed as MemoryRecord);
+        records.push(normalizeRecord(parsed));
       } catch {
         logger?.warn?.(`${TAG} Skipping malformed JSONL line in ${filePath}:${i + 1}`);
       }
@@ -185,7 +187,7 @@ export async function readAllMemoryRecords(
         const lines = raw.split("\n").filter((line: string) => line.trim());
         for (const line of lines) {
           try {
-            allRecords.push(JSON.parse(line) as MemoryRecord);
+            allRecords.push(normalizeRecord(JSON.parse(line) as Partial<MemoryRecord>));
           } catch {
             logger?.warn?.(`${TAG} Skipping malformed JSONL line in ${file}`);
           }
@@ -207,6 +209,38 @@ export async function readAllMemoryRecords(
     // records/ directory doesn't exist yet
     return [];
   }
+}
+
+function normalizeRecord(parsed: Partial<MemoryRecord>): MemoryRecord {
+  const type = (parsed.type ?? "episodic") as MemoryType;
+  return {
+    ...parsed,
+    type,
+    scope: normalizeRecordScope(parsed.scope, parsed.content ?? "", type),
+    metadata: parsed.metadata && typeof parsed.metadata === "object" ? parsed.metadata : {},
+    source_message_ids: Array.isArray(parsed.source_message_ids) ? parsed.source_message_ids : [],
+    timestamps: Array.isArray(parsed.timestamps) ? parsed.timestamps : [],
+    id: parsed.id ?? "",
+    content: parsed.content ?? "",
+    priority: typeof parsed.priority === "number" ? parsed.priority : 50,
+    scene_name: parsed.scene_name ?? "",
+    createdAt: parsed.createdAt ?? "",
+    updatedAt: parsed.updatedAt ?? "",
+    sessionKey: parsed.sessionKey ?? "",
+    sessionId: parsed.sessionId ?? "",
+  };
+}
+
+function normalizeRecordScope(rawScope: unknown, content: string, type: MemoryType): MemoryScope {
+  const normalized = normalizeMemoryScope(rawScope);
+  if (normalized) return normalized;
+  if (/(这个项目|本项目|当前项目|当前仓库|这个仓库|工作区|PR|issue|腾讯这个项目)/i.test(content)) {
+    return "project";
+  }
+  if (/(这次|本次|当前任务|本轮|临时|今天刚提|刚刚)/i.test(content)) {
+    return "session";
+  }
+  return type === "episodic" ? "session" : "global";
 }
 
 // ============================
