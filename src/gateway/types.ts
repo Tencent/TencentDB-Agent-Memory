@@ -19,6 +19,13 @@ export interface HealthResponse {
   status: "ok" | "degraded";
   version: string;
   uptime: number;
+  diagnostics: {
+    pid: number;
+    cwd: string;
+    dataDir: string;
+    user: string;
+    home: string;
+  };
   stores: {
     vectorStore: boolean;
     embeddingService: boolean;

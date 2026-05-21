@@ -85,6 +85,24 @@ export function resolveGatewayUserScope(baseDir: string, userId?: string): Gatew
   };
 }
 
+export interface GatewayDiagnostics {
+  pid: number;
+  cwd: string;
+  dataDir: string;
+  user: string;
+  home: string;
+}
+
+export function buildGatewayDiagnostics(dataDir: string): GatewayDiagnostics {
+  return {
+    pid: process.pid,
+    cwd: process.cwd(),
+    dataDir,
+    user: process.env.USER ?? process.env.USERNAME ?? "",
+    home: process.env.HOME ?? process.env.USERPROFILE ?? "",
+  };
+}
+
 // ============================
 // Console logger (for standalone gateway — no OpenClaw logger available)
 // ============================
@@ -270,6 +288,7 @@ export class TdaiGateway {
       status: this.core.getVectorStore() ? "ok" : "degraded",
       version: VERSION,
       uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      diagnostics: buildGatewayDiagnostics(this.config.data.baseDir),
       stores: {
         vectorStore: !!this.core.getVectorStore(),
         embeddingService: !!this.core.getEmbeddingService(),
