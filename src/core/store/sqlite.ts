@@ -721,7 +721,7 @@ export class VectorStore implements IMemoryStore {
 
     // L0 query statements for L1 runner (newest-first + LIMIT to bound memory)
     // Sort/filter by recorded_at (write time) instead of timestamp (conversation time)
-    // because L1 cursor uses recorded_at semantics. ISO 8601 string comparison preserves time order.
+    // because L1 cursor uses recorded_at semantics.
     this.stmtL0QueryAll = this.db.prepare(`
       SELECT record_id, session_key, session_id, role, message_text, recorded_at, timestamp
       FROM l0_conversations
@@ -733,8 +733,8 @@ export class VectorStore implements IMemoryStore {
     this.stmtL0QueryAfter = this.db.prepare(`
       SELECT record_id, session_key, session_id, role, message_text, recorded_at, timestamp
       FROM l0_conversations
-      WHERE session_key = ? AND recorded_at > ?
-      ORDER BY recorded_at DESC
+      WHERE session_key = ? AND julianday(recorded_at) > julianday(?)
+      ORDER BY julianday(recorded_at) DESC
       LIMIT ?
     `);
 
@@ -1881,7 +1881,8 @@ export class VectorStore implements IMemoryStore {
       // Query newest-first (DESC) with LIMIT, then reverse to chronological order
       let rows: Array<Record<string, unknown>>;
       if (afterRecordedAtMs && afterRecordedAtMs > 0) {
-        // Convert epoch ms to ISO string for recorded_at comparison
+        // Use SQLite's instant-aware datetime parser instead of raw ISO string
+        // comparison so offsets like -05:00 and +08:00 remain cursor-safe.
         const afterRecordedAtIso = new Date(afterRecordedAtMs).toISOString();
         rows = this.stmtL0QueryAfter.all(sessionKey, afterRecordedAtIso, limit) as Array<Record<string, unknown>>;
       } else {

@@ -277,6 +277,7 @@ docker exec -it hermes-memory hermes
 | `recall.timeoutMs` | `5000` | Recall timeout; on timeout, skip injection without blocking the conversation |
 | `extraction.enableDedup` | `true` | L1 vector dedup / conflict detection |
 | `capture.excludeAgents` | `[]` | Glob patterns to exclude specific agents (e.g. `bench-judge-*`) |
+| `capture.timezoneOffsetMinutes` | `480` | Timezone offset used for captured timestamps and extraction prompts; `480` = UTC+08:00 |
 | `capture.l0l1RetentionDays` | `0` | Local retention days for L0 / L1 files; `0` = never clean up |
 | `offload.mildOffloadRatio` | `0.5` | Mild compression trigger ratio (of context window) |
 | `offload.aggressiveCompressRatio` | `0.85` | Aggressive compression trigger ratio |

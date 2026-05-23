@@ -7,6 +7,7 @@
  */
 
 import type { ConversationMessage } from "../conversation/l0-recorder.js";
+import { formatTimezoneISO } from "../../utils/timezone.js";
 
 // ============================
 // System Prompt
@@ -112,17 +113,20 @@ export function formatExtractionPrompt(params: {
   newMessages: ConversationMessage[];
   backgroundMessages?: ConversationMessage[];
   previousSceneName?: string;
+  timezoneOffsetMinutes?: number;
 }): string {
-  const { newMessages, backgroundMessages = [], previousSceneName = "无" } = params;
+  const { newMessages, backgroundMessages = [], previousSceneName = "无", timezoneOffsetMinutes } = params;
+  const formatMessageTimestamp = (timestamp: number) =>
+    formatTimezoneISO(new Date(timestamp), timezoneOffsetMinutes);
 
   const bgText = backgroundMessages.length > 0
     ? backgroundMessages
-        .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+        .map((m) => `[${m.id}] [${m.role}] [${formatMessageTimestamp(m.timestamp)}]: ${m.content}`)
         .join("\n\n")
     : "无";
 
   const newText = newMessages
-    .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+    .map((m) => `[${m.id}] [${m.role}] [${formatMessageTimestamp(m.timestamp)}]: ${m.content}`)
     .join("\n\n");
 
   return `【上一个情境】：${previousSceneName}

@@ -18,6 +18,7 @@ import { recordConversation } from "../conversation/l0-recorder.js";
 import type { ConversationMessage } from "../conversation/l0-recorder.js";
 import type { IMemoryStore, L0Record } from "../store/types.js";
 import type { EmbeddingService } from "../store/embedding.js";
+import { formatTimezoneISO } from "../../utils/timezone.js";
 
 const TAG = "[memory-tdai] [capture]";
 
@@ -130,6 +131,7 @@ export async function performAutoCapture(params: {
           originalUserText,
           afterTimestamp,
           originalUserMessageCount,
+          timezoneOffsetMinutes: cfg.capture.timezoneOffsetMinutes,
         });
 
         if (filteredMessages.length === 0) {
@@ -172,7 +174,7 @@ export async function performAutoCapture(params: {
   const supportsBgEmbed = vectorStore?.supportsDeferredEmbedding === true;
 
   if (filteredMessages.length > 0 && vectorStore) {
-    const now = new Date().toISOString();
+    const now = formatTimezoneISO(new Date(), cfg.capture.timezoneOffsetMinutes);
     const bgRecords: Array<{ recordId: string; content: string }> = [];
     logger?.debug?.(
       `${TAG} [L0-vec-index] START indexing ${filteredMessages.length} message(s) for session ${sessionKey} ` +

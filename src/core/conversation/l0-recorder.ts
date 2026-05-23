@@ -18,6 +18,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { sanitizeText, stripCodeBlocks, shouldCaptureL0 } from "../../utils/sanitize.js";
+import { formatTimezoneDate, formatTimezoneISO } from "../../utils/timezone.js";
 
 // ============================
 // Types
@@ -101,6 +102,8 @@ export async function recordConversation(params: {
   originalUserText?: string;
   /** Epoch ms cursor: only process messages with timestamp strictly greater than this. */
   afterTimestamp?: number;
+  /** Timezone offset, in minutes, used for recordedAt and daily shard filenames. */
+  timezoneOffsetMinutes?: number;
   /**
    * Number of messages in the session at before_prompt_build time.
    * Used to locate the exact user message that originalUserText corresponds to:
@@ -109,7 +112,7 @@ export async function recordConversation(params: {
    */
   originalUserMessageCount?: number;
 }): Promise<ConversationMessage[]> {
-  const { sessionKey, sessionId, rawMessages, baseDir, logger, originalUserText, afterTimestamp, originalUserMessageCount } = params;
+  const { sessionKey, sessionId, rawMessages, baseDir, logger, originalUserText, afterTimestamp, originalUserMessageCount, timezoneOffsetMinutes } = params;
 
   // Step 1: Position slice + extract user/assistant messages.
   //
@@ -268,7 +271,8 @@ export async function recordConversation(params: {
   }
 
   // Step 4: Write to JSONL file — one message per line (flat format)
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = formatTimezoneISO(nowDate, timezoneOffsetMinutes);
   const lines: string[] = [];
   for (const msg of filtered) {
     const record: L0MessageRecord = {
@@ -283,7 +287,7 @@ export async function recordConversation(params: {
     lines.push(JSON.stringify(record));
   }
 
-  const shardDate = formatLocalDate(new Date());
+  const shardDate = formatTimezoneDate(nowDate, timezoneOffsetMinutes);
   const outDir = path.join(baseDir, "conversations");
   const outPath = path.join(outDir, `${shardDate}.jsonl`);
 
@@ -371,7 +375,7 @@ export async function readConversationRecords(
           records.push({
             sessionKey: (parsed.sessionKey as string) || sessionKey,
             sessionId: (parsed.sessionId as string) || "",
-            recordedAt: (parsed.recordedAt as string) || new Date().toISOString(),
+            recordedAt: (parsed.recordedAt as string) || formatTimezoneISO(new Date()),
             messageCount: 1,
             messages: [msg],
           });
@@ -569,14 +573,4 @@ function extractUserAssistantMessages(messages: unknown[]): ConversationMessage[
   }
 
   return result;
-}
-
-/**
- * Format local date as YYYY-MM-DD.
- */
-function formatLocalDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }

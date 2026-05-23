@@ -281,6 +281,7 @@ docker exec -it hermes-memory hermes
 | `recall.timeoutMs` | `5000` | 召回超时阈值，超时跳过注入不阻塞对话 |
 | `extraction.enableDedup` | `true` | L1 向量去重 / 冲突检测 |
 | `capture.excludeAgents` | `[]` | Glob 模式排除特定 Agent（如 `bench-judge-*`） |
+| `capture.timezoneOffsetMinutes` | `480` | 捕获时间戳和提取提示词使用的时区偏移分钟数；`480` = UTC+08:00 |
 | `capture.l0l1RetentionDays` | `0` | L0/L1 本地文件保留天数，`0` = 永不清理 |
 | `offload.mildOffloadRatio` | `0.5` | 温和压缩触发比例（占 context window） |
 | `offload.aggressiveCompressRatio` | `0.85` | 激进压缩触发比例 |

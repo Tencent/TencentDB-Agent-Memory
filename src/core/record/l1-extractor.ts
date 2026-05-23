@@ -106,6 +106,8 @@ export async function extractL1Memories(params: {
     conflictRecallTopK?: number;
     /** Override embedding timeout for capture-path calls (milliseconds) */
     embeddingTimeoutMs?: number;
+    /** Timezone offset, in minutes, used when formatting prompt timestamps. */
+    timezoneOffsetMinutes?: number;
     /**
      * Host-neutral LLM runner. When provided, used instead of creating
      * a CleanContextRunner (decouples from OpenClaw runtime).
@@ -165,6 +167,7 @@ export async function extractL1Memories(params: {
       config,
       logger,
       model: options.model,
+      timezoneOffsetMinutes: options.timezoneOffsetMinutes,
       llmRunner: options.llmRunner,
     });
     logger?.debug?.(`${TAG} LLM detected ${scenes.length} scene(s)`);
@@ -307,15 +310,17 @@ async function callLlmExtraction(params: {
   config: unknown;
   logger?: Logger;
   model?: string;
+  timezoneOffsetMinutes?: number;
   /** Host-neutral LLM runner — when provided, used instead of CleanContextRunner. */
   llmRunner?: LLMRunner;
 }): Promise<SceneSegment[]> {
-  const { newMessages, backgroundMessages, previousSceneName, config, logger, model, llmRunner } = params;
+  const { newMessages, backgroundMessages, previousSceneName, config, logger, model, timezoneOffsetMinutes, llmRunner } = params;
 
   const userPrompt = formatExtractionPrompt({
     newMessages,
     backgroundMessages,
     previousSceneName,
+    timezoneOffsetMinutes,
   });
 
   // [l1-debug] ENTRY — what are we about to ask the LLM to extract?

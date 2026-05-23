@@ -7,6 +7,8 @@
  * Minimal config (zero config): {} — all fields have sensible defaults.
  */
 
+import { normalizeTimezoneOffsetMinutes } from "./utils/timezone.js";
+
 // ============================
 // Type definitions
 // ============================
@@ -17,6 +19,8 @@ export interface CaptureConfig {
   enabled: boolean;
   /** Glob patterns to exclude agents (e.g. "bench-judge-*"); matched agents are fully ignored */
   excludeAgents: string[];
+  /** Timezone offset, in minutes, used when formatting captured timestamps (default: 480, UTC+08:00) */
+  timezoneOffsetMinutes: number;
   /**
    * L0/L1 local file retention days used as TTL switch.
    * 0 means cleanup disabled.(default: 0)
@@ -458,6 +462,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     capture: {
       enabled: bool(captureGroup, "enabled") ?? true,
       excludeAgents: strArray(captureGroup, "excludeAgents") ?? [],
+      timezoneOffsetMinutes: normalizeTimezoneOffsetMinutes(num(captureGroup, "timezoneOffsetMinutes")),
       l0l1RetentionDays: retentionDays ?? 0,
       allowAggressiveCleanup,
     },

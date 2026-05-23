@@ -28,6 +28,7 @@ import { generateSceneNavigation, stripSceneNavigation } from "../scene/scene-na
 import { buildSceneExtractionPrompt } from "../prompts/scene-extraction.js";
 import { report } from "../report/reporter.js";
 import type { LLMRunner } from "../types.js";
+import { formatTimezoneISO } from "../../utils/timezone.js";
 
 const TAG = "[memory-tdai] [extractor]";
 
@@ -51,6 +52,8 @@ export interface SceneExtractorOptions {
   maxScenes?: number;
   sceneBackupCount?: number;
   timeoutMs?: number;
+  /** Timezone offset, in minutes, used when formatting prompt timestamps. */
+  timezoneOffsetMinutes?: number;
   logger?: ExtractorLogger;
   /** Plugin instance ID for metric reporting (optional) */
   instanceId?: string;
@@ -91,6 +94,7 @@ export class SceneExtractor {
   private maxScenes: number;
   private sceneBackupCount: number;
   private timeoutMs: number;
+  private timezoneOffsetMinutes: number | undefined;
   private logger: ExtractorLogger | undefined;
   private instanceId: string | undefined;
 
@@ -99,6 +103,7 @@ export class SceneExtractor {
     this.maxScenes = opts.maxScenes ?? 15;
     this.sceneBackupCount = opts.sceneBackupCount ?? 10;
     this.timeoutMs = opts.timeoutMs ?? 300_000; // 5 min — LLM may do multiple tool calls
+    this.timezoneOffsetMinutes = opts.timezoneOffsetMinutes;
     this.logger = opts.logger;
     this.instanceId = opts.instanceId;
 
@@ -190,7 +195,7 @@ export class SceneExtractor {
       2,
     );
 
-    const currentTimestamp = formatTimestamp(new Date());
+    const currentTimestamp = formatTimezoneISO(new Date(), this.timezoneOffsetMinutes);
 
     const { systemPrompt, userPrompt } = buildSceneExtractionPrompt({
       memoriesJson,
@@ -433,8 +438,4 @@ export class SceneExtractor {
     // persona.md is at dataDir root, no subdir needed
     await fs.writeFile(personaPath, updated, "utf-8");
   }
-}
-
-function formatTimestamp(d: Date): string {
-  return d.toISOString();
 }

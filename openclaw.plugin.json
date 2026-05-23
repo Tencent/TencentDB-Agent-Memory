@@ -24,6 +24,7 @@
         "properties": {
           "enabled": { "type": "boolean", "default": true, "description": "是否启用自动对话捕获" },
           "excludeAgents": { "type": "array", "items": { "type": "string" }, "default": [], "description": "排除的 Agent glob 模式列表（如 bench-judge-*），匹配的 agent 不会被捕获、召回或参与 pipeline 调度" },
+          "timezoneOffsetMinutes": { "type": "number", "default": 480, "description": "捕获与提取提示词中时间戳使用的时区偏移分钟数，范围 -840 到 840；默认 480 表示 UTC+08:00" },
           "l0l1RetentionDays": { "type": "number", "default": 0, "description": "L0/L1 本地文件保留天数（单位天）。0=不清理；非0时默认必须>=3。若为1或2，需显式开启 allowAggressiveCleanup" },
           "allowAggressiveCleanup": { "type": "boolean", "default": false, "description": "是否允许高风险清理配置（l0l1RetentionDays=1或2）" },
           "cleanTime": { "type": "string", "default": "03:00", "description": "每日清理执行时间（HH:mm）" }
