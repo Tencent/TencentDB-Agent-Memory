@@ -341,6 +341,36 @@ docker exec -it hermes-memory hermes
 | 混合检索 | BM25 + 向量 + RRF，兼顾关键词和语义召回 |
 | Agent 工具 | `tdai_memory_search` / `tdai_conversation_search` |
 
+### 非 OpenClaw 宿主的 Library Mode
+
+OpenClaw 仍然是默认插件入口，但其他宿主可以复用同一套
+host-neutral core，而不需要依赖 OpenClaw runtime API：
+
+```ts
+import { TdaiCore, parseConfig } from "@tencentdb-agent-memory/memory-tencentdb/core"
+import type {
+  CompletedTurn,
+  HostAdapter,
+} from "@tencentdb-agent-memory/memory-tencentdb/core"
+
+const config = parseConfig({
+  capture: { enabled: true },
+  extraction: { enabled: false },
+})
+
+const core = new TdaiCore({
+  hostAdapter,
+  config,
+})
+await core.initialize()
+```
+
+`TdaiCore` 通过 `HostAdapter.getLLMRunnerFactory()` 获取模型执行器，
+所以构造函数只需要 adapter 和解析后的 config。
+
+如果只需要配置解析，可以从
+`@tencentdb-agent-memory/memory-tencentdb/config` 导入 `parseConfig`。
+
 ---
 
 ## 文档
