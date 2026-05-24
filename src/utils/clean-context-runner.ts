@@ -439,12 +439,9 @@ export class CleanContextRunner {
 
       // Phase 2: Embedded agent run (LLM call + tool calls)
       const agentStartMs = Date.now();
-      // extraSystemPrompt: fallback for openclaw < 2026.4.7 which does not support
-      // config.agents.defaults.systemPromptOverride. On newer versions the
-      // override takes precedence and this becomes a no-op append.
-      const effectiveSystemPrompt =
-        params.systemPrompt ||
-        "You are a precise data extraction and generation assistant. Follow the user instructions exactly. Respond only with the requested output format.";
+      // System prompt is fully handled via config.agents.defaults.systemPromptOverride.
+      // Do NOT pass extraSystemPrompt — it would cause the same prompt to appear
+      // twice in the final system message (once from override, once appended).
       const result = await runEmbeddedPiAgent({
         sessionId,
         sessionFile,
@@ -460,7 +457,6 @@ export class CleanContextRunner {
         // Instead rely on cleanConfig.tools.allow to restrict the tool set
         // to a minimal read-only tool (when enableTools=false).
         disableTools: false,
-        extraSystemPrompt: effectiveSystemPrompt,
         streamParams: {
           maxTokens: params.maxTokens,
         },
