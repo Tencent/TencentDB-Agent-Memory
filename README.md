@@ -385,3 +385,72 @@ We welcome every kind of contribution — bug reports, feature ideas, doc fixes,
 </table>
 
 [MIT](./LICENSE) © TencentDB Agent Memory Team
+
+
+## ❓ FAQ
+
+### What is TencentDB Agent Memory?
+TencentDB Agent Memory delivers fully local long-term memory for AI agents. It enables agents to remember conversations, learn from interactions, and maintain context across sessions. Built by Tencent.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Long-term Memory** | Persistent memory across agent sessions |
+| **Local Storage** | Fully local, no external dependencies |
+| **Memory Types** | Conversation, semantic, episodic memory |
+| **Easy Integration** | npm package, simple API |
+| **Scalable** | Works with TencentDB cloud storage |
+| **Open Source** | MIT License |
+
+### How to Install
+
+```bash
+# npm
+npm install @tencentdb-agent-memory/memory-tencentdb
+
+# yarn
+yarn add @tencentdb-agent-memory/memory-tencentdb
+```
+
+### Memory Architecture
+
+| Layer | Purpose | Storage |
+|-------|---------|---------|
+| **L1 - Short-term** | Recent context | In-memory |
+| **L2 - Episodic** | Conversation history | Local DB |
+| **L3 - Semantic** | Knowledge base | TencentDB |
+| **L4 - Long-term** | Persistent memory | Cloud |
+
+### Supported AI Frameworks
+
+| Framework | Integration |
+|-----------|-------------|
+| OpenAI Agents | ✅ Native support |
+| LangChain | ✅ Memory adapter |
+| AutoGen | ✅ Multi-agent memory |
+| CrewAI | ✅ Shared memory |
+| Claude Code | ✅ Memory plugin |
+
+### Common Use Cases
+
+1. **Chatbots** - Maintain conversation context across sessions
+2. **AI Assistants** - Remember user preferences and history
+3. **Multi-Agent Systems** - Share memory between agents
+4. **Research Agents** - Build knowledge over time
+
+### Why Choose TencentDB Agent Memory?
+
+- **Enterprise-grade**: Built by Tencent, battle-tested
+- **Fully Local**: No external API calls, privacy-first
+- **Easy API**: Simple npm install and use
+- **Scalable**: TencentDB cloud for large deployments
+- **Multi-Agent**: Share memory across agent teams
+
+### License
+MIT License - See [LICENSE](LICENSE) for details.
+
+### Help & Resources
+- [Documentation](https://github.com/Tencent/TencentDB-Agent-Memory#readme)
+- [npm Package](https://www.npmjs.com/package/@tencentdb-agent-memory/memory-tencentdb)
+- [Issues](https://github.com/Tencent/TencentDB-Agent-Memory/issues)
