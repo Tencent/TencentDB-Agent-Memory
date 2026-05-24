@@ -17,6 +17,7 @@ import { EXTRACT_MEMORIES_SYSTEM_PROMPT, formatExtractionPrompt } from "../promp
 import { batchDedup } from "./l1-dedup.js";
 import { writeMemory, generateMemoryId } from "./l1-writer.js";
 import type { ExtractedMemory, MemoryRecord, MemoryType, DedupDecision } from "./l1-writer.js";
+import { preExtractMemories, mergeExtractedMemories } from "./pre-extractor.js";
 import { CleanContextRunner } from "../../utils/clean-context-runner.js";
 import { sanitizeJsonForParse, shouldExtractL1 } from "../../utils/sanitize.js";
 import type { IMemoryStore } from "../store/types.js";
@@ -146,6 +147,19 @@ export async function extractL1Memories(params: {
     return { success: true, extractedCount: 0, storedCount: 0, records: [], sceneNames: [] };
   }
 
+  // ── Step 0: Rule-based pre-extraction (v3.1) ──
+  // Catch obvious persona/instruction patterns BEFORE the LLM call.
+  // This reduces token cost for clear patterns and provides hints to the LLM.
+  const preResult = preExtractMemories(qualifiedMessages);
+  if (preResult.direct.length > 0) {
+    logger?.debug?.(
+      `${TAG} Pre-extracted ${preResult.direct.length} HIGH-confidence items directly (bypass LLM)`);
+  }
+  if (preResult.hints.length > 0) {
+    logger?.debug?.(
+      `${TAG} Pre-extracted ${preResult.hints.length} MEDIUM-confidence hints for LLM guidance`);
+  }
+
   // Split messages into background (older) + new (recent)
   const newMessages = qualifiedMessages.slice(-maxNewMessages);
   const bgEndIdx = qualifiedMessages.length - newMessages.length;
@@ -197,6 +211,30 @@ export async function extractL1Memories(params: {
   }
 
   logger?.debug?.(`${TAG} Total extracted memories: ${allExtracted.length} across ${scenes.length} scene(s)`);
+
+  // ── Merge rule-extracted direct items into LLM results ──
+  if (preResult.direct.length > 0) {
+    const beforeMerge = allExtracted.length;
+    const merged = mergeExtractedMemories(allExtracted, preResult);
+    const added = merged.length - beforeMerge;
+    if (added > 0) {
+      logger?.debug?.(
+        `${TAG} Merged ${added} pre-extracted items into LLM results (total: ${merged.length})`);
+    }
+    allExtracted.length = 0;
+    allExtracted.push(...merged);
+  }
+
+  // ── Confidence check: filter low-quality LLM extractions ──
+  const confidenceFiltered = allExtracted
+    .filter((m) => passesConfidenceCheck(m, messages, logger));
+  if (confidenceFiltered.length < allExtracted.length) {
+    logger?.debug?.(
+      `${TAG} Confidence filter: ${allExtracted.length} → ${confidenceFiltered.length} memories ` +
+      `(${allExtracted.length - confidenceFiltered.length} rejected)`);
+    allExtracted.length = 0;
+    allExtracted.push(...confidenceFiltered);
+  }
 
   if (allExtracted.length === 0) {
     return {
@@ -323,34 +361,43 @@ async function callLlmExtraction(params: {
     `${TAG} [l1-debug] ENTRY taskId=l1-extraction, newMsgs=${newMessages.length}, bgMsgs=${backgroundMessages.length}, userPromptLen=${userPrompt.length}, sysPromptLen=${EXTRACT_MEMORIES_SYSTEM_PROMPT.length}, model=${model ?? "(default)"}, previousSceneName=${previousSceneName ? JSON.stringify(previousSceneName) : "(none)"}, runnerKind=${llmRunner ? "llmRunner" : "CleanContextRunner"}`,
   );
 
-  let result: string;
-
-  if (llmRunner) {
-    // Use the host-neutral LLMRunner interface
-    result = await llmRunner.run({
-      prompt: userPrompt,
-      systemPrompt: EXTRACT_MEMORIES_SYSTEM_PROMPT,
-      taskId: "l1-extraction",
-      timeoutMs: 180_000,
-    });
-  } else {
-    // Fallback: create CleanContextRunner (OpenClaw path)
+  const runLlm = async (prompt: string, systemPrompt: string, taskId: string): Promise<string> => {
+    if (llmRunner) {
+      return llmRunner.run({ prompt, systemPrompt, taskId, timeoutMs: 180_000 });
+    }
     const runner = new CleanContextRunner({
       config,
       modelRef: model,
       enableTools: false,
       logger,
     });
+    return runner.run({ prompt, systemPrompt, taskId, timeoutMs: 180_000 });
+  };
 
-    result = await runner.run({
-      prompt: userPrompt,
-      systemPrompt: EXTRACT_MEMORIES_SYSTEM_PROMPT,
-      taskId: "l1-extraction",
-      timeoutMs: 180_000,
-    });
+  let result = await runLlm(userPrompt, EXTRACT_MEMORIES_SYSTEM_PROMPT, "l1-extraction");
+
+  const { scenes, parseError } = parseExtractionResultWithError(result, logger);
+
+  // ── Self-correction retry: if JSON parsing failed, retry once with error feedback ──
+  if (parseError && scenes.length === 0) {
+    logger?.warn?.(
+      `${TAG} First extraction JSON parse failed: ${parseError.slice(0, 200)}. Retrying with correction hint...`);
+
+    try {
+      const correctionPrompt = `${userPrompt}\n\n【⚠ 格式错误】你上一次的输出无法解析为有效 JSON。错误信息：${parseError}\n请严格按照要求的 JSON 数组格式重新输出，不要添加任何解释或 Markdown 代码块标记。`;
+      result = await runLlm(correctionPrompt, EXTRACT_MEMORIES_SYSTEM_PROMPT, "l1-extraction-retry");
+      const retryResult = parseExtractionResultWithError(result, logger);
+      if (retryResult.scenes.length > 0) {
+        logger?.info?.(`${TAG} Self-correction retry succeeded: ${retryResult.scenes.length} scene(s) extracted`);
+        return retryResult.scenes;
+      }
+      logger?.warn?.(`${TAG} Self-correction retry also failed: ${retryResult.parseError?.slice(0, 200)}`);
+    } catch (err) {
+      logger?.warn?.(`${TAG} Self-correction retry threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  return parseExtractionResult(result, logger);
+  return scenes;
 }
 
 /**
@@ -358,32 +405,39 @@ async function callLlmExtraction(params: {
  * Expected format: [{scene_name, message_ids, memories: [...]}]
  */
 function parseExtractionResult(raw: string, logger?: Logger): SceneSegment[] {
+  return parseExtractionResultWithError(raw, logger).scenes;
+}
+
+/**
+ * Parse the LLM's JSON response, returning both scenes and parse error (if any).
+ * This allows the caller to use the error for self-correction retry.
+ */
+function parseExtractionResultWithError(
+  raw: string,
+  logger?: Logger,
+): { scenes: SceneSegment[]; parseError?: string } {
   try {
-    // Strip markdown code block wrappers if present
     let cleaned = raw.trim();
     if (cleaned.startsWith("```")) {
       cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
     }
 
-    // Try to extract JSON array
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     if (!arrayMatch) {
-      logger?.warn?.(`${TAG} No JSON array found in extraction response`);
-      // [l1-debug] NO_JSON — dump the full raw so we can see what the LLM actually said
       const rawPreview = raw.slice(0, 2048);
+      logger?.warn?.(`${TAG} No JSON array found in extraction response`);
       logger?.warn?.(
         `${TAG} [l1-debug] NO_JSON taskId=l1-extraction, rawLen=${raw.length}, cleanedLen=${cleaned.length}, rawFull=${JSON.stringify(rawPreview)}${raw.length > 2048 ? `…(+${raw.length - 2048})` : ""}`,
       );
-      return [];
+      return { scenes: [], parseError: "输出中未找到 JSON 数组" };
     }
 
-    // Sanitize control characters inside JSON string literals that LLM may produce
     const sanitized = sanitizeJsonForParse(arrayMatch[0]);
     const parsed = JSON.parse(sanitized) as unknown[];
 
     if (!Array.isArray(parsed)) {
       logger?.warn?.(`${TAG} Extraction response is not an array`);
-      return [];
+      return { scenes: [], parseError: "输出不是 JSON 数组" };
     }
 
     const scenes: SceneSegment[] = [];
@@ -408,10 +462,11 @@ function parseExtractionResult(raw: string, logger?: Logger): SceneSegment[] {
       });
     }
 
-    return scenes;
+    return { scenes };
   } catch (err) {
-    logger?.warn?.(`${TAG} Failed to parse extraction result: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    const msg = err instanceof Error ? err.message : String(err);
+    logger?.warn?.(`${TAG} Failed to parse extraction result: ${msg}`);
+    return { scenes: [], parseError: `JSON 解析失败: ${msg}` };
   }
 }
 
@@ -514,6 +569,102 @@ async function storeAllDirectly(
   }
 
   return storedRecords;
+}
+
+// ============================
+// Confidence check
+// ============================
+
+/**
+ * Validate an LLM-extracted memory against basic quality heuristics.
+ * Returns false if the memory appears to be hallucinated or too low-quality.
+ */
+function passesConfidenceCheck(
+  mem: ExtractedMemory,
+  allMessages: ConversationMessage[],
+  logger?: Logger,
+): boolean {
+  // Check 1: Minimal content
+  const isCJK = /[\u4e00-\u9fff]/.test(mem.content);
+  if (isCJK && mem.content.length < 4) {
+    logger?.debug?.(`${TAG} [confidence] REJECT too-short-CJK: "${mem.content.slice(0, 40)}"`);
+    return false;
+  }
+  if (!isCJK && mem.content.length < 15) {
+    logger?.debug?.(`${TAG} [confidence] REJECT too-short: "${mem.content.slice(0, 40)}"`);
+    return false;
+  }
+
+  // Check 2: Source traceability
+  const memWords = extractSignificantWords(mem.content);
+  if (memWords.size === 0) {
+    logger?.debug?.(`${TAG} [confidence] REJECT no-meaningful-words: "${mem.content.slice(0, 40)}"`);
+    return false;
+  }
+
+  const sourceMsgs = allMessages.filter((m) =>
+    mem.source_message_ids.includes(m.id),
+  );
+
+  if (sourceMsgs.length > 0) {
+    let matchedWords = 0;
+    for (const word of memWords) {
+      for (const src of sourceMsgs) {
+        if (src.content.includes(word)) { matchedWords++; break; }
+      }
+    }
+    const matchRatio = memWords.size > 0 ? matchedWords / memWords.size : 0;
+    if (matchRatio < 0.3) {
+      logger?.debug?.(
+        `${TAG} [confidence] REJECT low-traceability (${(matchRatio * 100).toFixed(0)}%): "${mem.content.slice(0, 60)}"`);
+      return false;
+    }
+  }
+
+  // Check 3: Type consistency
+  if (mem.type === "persona") {
+    if (!/[用我]户|我/.test(mem.content)) {
+      logger?.debug?.(`${TAG} [confidence] REJECT persona-no-user-ref: "${mem.content.slice(0, 40)}"`);
+      return false;
+    }
+  }
+
+  if (mem.type === "instruction") {
+    if (!/AI|回复|回答|使用|输出|禁止|必须|要求/.test(mem.content)) {
+      logger?.debug?.(`${TAG} [confidence] REJECT instruction-no-directive: "${mem.content.slice(0, 40)}"`);
+      return false;
+    }
+  }
+
+  if (mem.type === "episodic") {
+    if (/^用户询问了|^用户说了|^用户问了|^AI回答/.test(mem.content) && mem.content.length < 30) {
+      logger?.debug?.(`${TAG} [confidence] REJECT trivial-episodic: "${mem.content.slice(0, 40)}"`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Extract significant words from text for source traceability.
+ * CJK: 2+ character sequences as overlapping bigrams. Non-CJK: 4+ letter words.
+ */
+function extractSignificantWords(text: string): Set<string> {
+  const words = new Set<string>();
+  const cjkSeq = text.match(/[\u4e00-\u9fff]{2,}/g);
+  if (cjkSeq) {
+    for (const seq of cjkSeq) {
+      for (let i = 0; i <= seq.length - 2; i++) {
+        words.add(seq.slice(i, i + 2));
+      }
+    }
+  }
+  const alphaWords = text.match(/[a-zA-Z]{4,}/g);
+  if (alphaWords) {
+    for (const w of alphaWords) words.add(w.toLowerCase());
+  }
+  return words;
 }
 
 // ============================
