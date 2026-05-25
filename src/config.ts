@@ -58,6 +58,10 @@ export interface PersonaConfig {
 
 /** Pipeline trigger settings (L1→L2→L3 scheduling). */
 export interface PipelineTriggerConfig {
+  /** Enable L2 scene extraction stage (default: true) */
+  enableL2: boolean;
+  /** Enable L3 persona generation stage (default: true) */
+  enableL3: boolean;
   /** Trigger L1 after every N conversation rounds (default: 5) */
   everyNConversations: number;
   /** Enable warm-up: start threshold at 1, double after each L1 (1→2→4→...→everyN) (default: true) */
@@ -192,6 +196,8 @@ export interface StandaloneLLMOverrideConfig {
   maxTokens: number;
   /** Request timeout in milliseconds (default: 120000). */
   timeoutMs: number;
+  /** Provider-specific options passed through to the AI SDK generateText call. */
+  providerOptions?: Record<string, unknown>;
 }
 
 /** Context Offload settings — controls multi-layer context compression. */
@@ -233,6 +239,10 @@ export interface OffloadConfig {
   backendApiKey?: string;
   /** Backend call timeout in milliseconds (default: 10000) */
   backendTimeoutMs: number;
+  /** Explicitly disable HTTPS certificate verification for backend calls. Default false. */
+  allowInsecureTls: boolean;
+  /** Optional CA certificate PEM path used for HTTPS backend calls. */
+  backendCaPemPath?: string;
   /**
    * Offload data retention days. Sessions/refs/mmds older than this are cleaned up.
    * 0 = disabled (default). Values in (0, 3) are treated as invalid and forced to 0.
@@ -449,6 +459,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     backendUrl: optStr(offloadGroup, "backendUrl"),
     backendApiKey: optStr(offloadGroup, "backendApiKey"),
     backendTimeoutMs: num(offloadGroup, "backendTimeoutMs") ?? 120000,
+    allowInsecureTls: bool(offloadGroup, "allowInsecureTls") ?? false,
+    backendCaPemPath: optStr(offloadGroup, "backendCaPemPath"),
     offloadRetentionDays: normalizeOffloadRetentionDays(num(offloadGroup, "offloadRetentionDays") ?? 0),
     logMaxSizeMb: num(offloadGroup, "logMaxSizeMb") ?? 50,
     userId: optStr(offloadGroup, "userId"),
@@ -475,6 +487,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
       model: optStr(personaGroup, "model"),
     },
     pipeline: {
+      enableL2: bool(pipelineGroup, "enableL2") ?? true,
+      enableL3: bool(pipelineGroup, "enableL3") ?? true,
       everyNConversations: num(pipelineGroup, "everyNConversations") ?? 5,
       enableWarmup: bool(pipelineGroup, "enableWarmup") ?? true,
       l1IdleTimeoutSeconds: num(pipelineGroup, "l1IdleTimeoutSeconds") ?? 600,
@@ -535,6 +549,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
         model: str(llmGroup, "model") ?? "gpt-4o",
         maxTokens: num(llmGroup, "maxTokens") ?? 4096,
         timeoutMs: num(llmGroup, "timeoutMs") ?? 120_000,
+        providerOptions: plainObject(llmGroup, "providerOptions"),
       };
     })(),
     offload,
@@ -569,6 +584,11 @@ function num(src: Record<string, unknown>, key: string): number | undefined {
 function bool(src: Record<string, unknown>, key: string): boolean | undefined {
   const v = src[key];
   return typeof v === "boolean" ? v : undefined;
+}
+
+function plainObject(src: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const v = src[key];
+  return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
 }
 
 function strArray(src: Record<string, unknown>, key: string): string[] | undefined {

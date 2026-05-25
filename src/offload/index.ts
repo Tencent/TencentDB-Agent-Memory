@@ -117,6 +117,17 @@ function simpleHash(str: string): number {
   return hash;
 }
 
+export function parseProviderModelRef(modelRef: string): { providerKey: string; modelId: string } {
+  const slash = modelRef.indexOf("/");
+  if (slash <= 0) {
+    return { providerKey: "", modelId: modelRef };
+  }
+  return {
+    providerKey: modelRef.slice(0, slash),
+    modelId: modelRef.slice(slash + 1),
+  };
+}
+
 
 function _extractLatestTurn(_messages: any[], currentPrompt: string | null): string | null {
   const effectivePrompt = _isHeartbeatText(currentPrompt ?? "") ? null : currentPrompt;
@@ -326,6 +337,10 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
         () => _lastActiveSessionKey,
         () => _resolvedUserId,
         () => _lastActiveSessionKey,
+        {
+          allowInsecureTls: offloadConfig.allowInsecureTls,
+          backendCaPemPath: offloadConfig.backendCaPemPath,
+        },
       );
     }
   } else {
@@ -351,9 +366,7 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
     }
 
     if (resolvedModelRef) {
-      const modelParts = resolvedModelRef.split("/", 2);
-      const providerKey = modelParts[0];
-      const modelId = modelParts[1] ?? resolvedModelRef;
+      const { providerKey, modelId } = parseProviderModelRef(resolvedModelRef);
       const models = (api.config as any)?.models;
       const providerCfg = models?.providers?.[providerKey];
       const baseUrl = providerCfg?.baseUrl ?? providerCfg?.baseURL;
@@ -1242,17 +1255,17 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
 // ─── OffloadContextEngine ────────────────────────────────────────────────────
 
 class OffloadContextEngine {
-  private _sessions: SessionRegistry;
-  private _logger: PluginLogger;
-  private _pCfg: Partial<PluginConfig>;
-  private _getContextWindow: () => number;
-  private _notifyL2NewNullEntries: (count: number) => void;
-  private _clearL2Timeout: () => void;
-  private _l4State: { pendingResult: any };
-  private _flushL1: (mgr: OffloadStateManager, triggerSource: string, fireAndForget?: boolean, maxCount?: number) => Promise<void>;
-  private _backendClient: BackendClient | null;
-  private _judgeL15: (mgr: OffloadStateManager, event: any, ctx: any) => Promise<void>;
-  private _disposeL15: () => void;
+  private _sessions!: SessionRegistry;
+  private _logger!: PluginLogger;
+  private _pCfg!: Partial<PluginConfig>;
+  private _getContextWindow!: () => number;
+  private _notifyL2NewNullEntries!: (count: number) => void;
+  private _clearL2Timeout!: () => void;
+  private _l4State!: { pendingResult: any };
+  private _flushL1!: (mgr: OffloadStateManager, triggerSource: string, fireAndForget?: boolean, maxCount?: number) => Promise<void>;
+  private _backendClient!: BackendClient | null;
+  private _judgeL15!: (mgr: OffloadStateManager, event: any, ctx: any) => Promise<void>;
+  private _disposeL15!: () => void;
 
   constructor(opts: any) {
     this.update(opts);

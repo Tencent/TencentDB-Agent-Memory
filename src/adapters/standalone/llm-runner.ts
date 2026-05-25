@@ -49,6 +49,8 @@ export interface StandaloneLLMConfig {
   maxTokens?: number;
   /** Request timeout in milliseconds (default: 120_000). */
   timeoutMs?: number;
+  /** Provider-specific options passed through to the AI SDK. */
+  providerOptions?: Record<string, unknown>;
 }
 
 // ============================
@@ -149,12 +151,6 @@ function createSandboxedTools(workspaceDir: string, logger?: Logger) {
   };
 }
 
-/** Read-only tool subset — used when enableTools=false to avoid empty tools rejection. */
-function createReadOnlyTools(workspaceDir: string, logger?: Logger) {
-  const all = createSandboxedTools(workspaceDir, logger);
-  return { read_file: all.read_file };
-}
-
 // ============================
 // StandaloneLLMRunner
 // ============================
@@ -188,30 +184,28 @@ export class StandaloneLLMRunner implements LLMRunner {
       `tools=${this.enableTools}, timeout=${timeoutMs}ms`,
     );
 
-    // Create OpenAI-compatible provider via AI SDK
-    // Use "compatible" mode to call /chat/completions (not Responses API),
-    // which works with all OpenAI-compatible backends (DeepSeek, Qwen, etc.)
+    // Create OpenAI-compatible provider via AI SDK.
     const provider = createOpenAI({
       baseURL: this.config.baseUrl,
       apiKey: this.config.apiKey,
-      compatibility: "compatible",
     });
 
-    // Select tools based on mode
-    const tools = this.enableTools
-      ? createSandboxedTools(workspaceDir, this.logger)
-      : createReadOnlyTools(workspaceDir, this.logger);
-
     try {
-      const result = await generateText({
+      const request: Parameters<typeof generateText>[0] = {
         model: provider.chat(this.model),
         system: params.systemPrompt,
         prompt: params.prompt,
-        tools,
         stopWhen: stepCountIs(this.enableTools ? MAX_TOOL_ITERATIONS : 1),
         maxOutputTokens: maxTokens,
         abortSignal: AbortSignal.timeout(timeoutMs),
-      });
+        providerOptions: (params.providerOptions ?? this.config.providerOptions) as any,
+      };
+
+      if (this.enableTools) {
+        request.tools = createSandboxedTools(workspaceDir, this.logger);
+      }
+
+      const result = await generateText(request);
 
       const text = result.text.trim();
       const totalMs = Date.now() - runStartMs;

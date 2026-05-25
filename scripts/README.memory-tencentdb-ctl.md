@@ -157,11 +157,21 @@ memory-tencentdb-ctl config embedding \
   --dimensions 1536 \
   --restart
 
+# ZeroEntropy 使用原生 /v1/models/embed 接口，base-url 不需要带 /v1
+memory-tencentdb-ctl config embedding \
+  --provider   zeroentropy \
+  --api-key    "$ZEROENTROPY_API_KEY" \
+  --base-url   "https://api.zeroentropy.dev" \
+  --model      "zembed-1" \
+  --dimensions 2560 \
+  --restart
+
 # 关闭 embedding（退化为 BM25/关键词召回）
 memory-tencentdb-ctl config embedding --provider none --restart
 ```
 
 - JSON 写入点：`$.memory.embedding.{provider, baseUrl, apiKey, model, dimensions, enabled, proxyUrl?}`。
+- `zeroentropy` provider 会调用 `POST <baseUrl>/v1/models/embed` 并解析 `results[].embedding`。
 - `qclaw` provider 额外要求 `--proxy-url`。
 - 校验规则与 `src/config.ts` 的 `parseConfig()` 对齐：`dimensions` 为正整数，非 `none` 必须带 `apiKey/baseUrl/model/dimensions`；缺项直接报错不写半残 JSON。
 

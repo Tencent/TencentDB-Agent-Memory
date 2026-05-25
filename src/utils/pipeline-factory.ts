@@ -666,10 +666,14 @@ export function createPipelineManager(
       enableWarmup: cfg.pipeline.enableWarmup,
       l1: { idleTimeoutSeconds: cfg.pipeline.l1IdleTimeoutSeconds },
       l2: {
+        enabled: cfg.pipeline.enableL2,
         delayAfterL1Seconds: cfg.pipeline.l2DelayAfterL1Seconds,
         minIntervalSeconds: cfg.pipeline.l2MinIntervalSeconds,
         maxIntervalSeconds: cfg.pipeline.l2MaxIntervalSeconds,
         sessionActiveWindowHours: cfg.pipeline.sessionActiveWindowHours,
+      },
+      l3: {
+        enabled: cfg.pipeline.enableL3,
       },
     },
     logger,

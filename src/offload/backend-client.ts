@@ -12,6 +12,7 @@ import type { OffloadEntry, ToolPair, TaskJudgment, PluginLogger } from "./types
 import { traceOffloadModelIo } from "./opik-tracer.js";
 import * as https from "node:https";
 import * as http from "node:http";
+import { readFile } from "node:fs/promises";
 
 // ─── Request / Response Types ────────────────────────────────────────────────
 
@@ -101,6 +102,25 @@ export interface StoreStateResponse {
   insertedId?: string;
 }
 
+export interface BackendClientTlsOptions {
+  allowInsecureTls?: boolean;
+  backendCaPemPath?: string;
+}
+
+export function buildHttpsRequestOptions(options: {
+  allowInsecureTls?: boolean;
+  ca?: Buffer;
+}): Pick<https.RequestOptions, "rejectUnauthorized" | "ca"> {
+  const requestOptions: Pick<https.RequestOptions, "rejectUnauthorized" | "ca"> = {};
+  if (options.ca) {
+    requestOptions.ca = options.ca;
+  }
+  if (options.allowInsecureTls) {
+    requestOptions.rejectUnauthorized = false;
+  }
+  return requestOptions;
+}
+
 // ─── BackendClient ───────────────────────────────────────────────────────────
 
 export class BackendClient {
@@ -114,6 +134,8 @@ export class BackendClient {
   private userIdFn: () => string | null;
   /** Resolves the value of the `X-Task-Id` header sent on every call (optional). */
   private taskIdFn: () => string | null;
+  private tlsOptions: BackendClientTlsOptions;
+  private warnedInsecureTls = false;
 
   constructor(
     baseUrl: string,
@@ -123,6 +145,7 @@ export class BackendClient {
     sessionKeyFn?: () => string | null,
     userIdFn?: () => string | null,
     taskIdFn?: () => string | null,
+    tlsOptions?: BackendClientTlsOptions,
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.apiKey = apiKey;
@@ -130,6 +153,7 @@ export class BackendClient {
     this.sessionKeyFn = sessionKeyFn ?? (() => null);
     this.userIdFn = userIdFn ?? (() => null);
     this.taskIdFn = taskIdFn ?? (() => null);
+    this.tlsOptions = tlsOptions ?? {};
   }
 
   /** L1 Summarize — synchronous await (used by assemble flush + force trigger) */
@@ -296,6 +320,22 @@ export class BackendClient {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === "https:";
     const transport = isHttps ? https : http;
+    const ca = isHttps && this.tlsOptions.backendCaPemPath
+      ? await readFile(this.tlsOptions.backendCaPemPath)
+      : undefined;
+    const httpsRequestOptions = isHttps
+      ? buildHttpsRequestOptions({
+          allowInsecureTls: this.tlsOptions.allowInsecureTls,
+          ca,
+        })
+      : {};
+
+    if (isHttps && this.tlsOptions.allowInsecureTls && !this.warnedInsecureTls) {
+      this.warnedInsecureTls = true;
+      this.logger.warn(
+        "[context-offload] HTTPS backend TLS certificate verification is disabled by explicit allowInsecureTls=true",
+      );
+    }
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -309,7 +349,7 @@ export class BackendClient {
           path: parsed.pathname + parsed.search,
           method: "POST",
           headers: reqHeaders,
-          ...(isHttps ? { rejectUnauthorized: false } : {}),
+          ...httpsRequestOptions,
         },
         (res) => {
           let data = "";

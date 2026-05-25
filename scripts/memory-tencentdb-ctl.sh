@@ -507,7 +507,7 @@ cmd_config_embedding() {
             *) die "config embedding: 未知参数 $1" 1 ;;
         esac
     done
-    [[ -n "$provider" ]] || die "--provider 必填（none/openai/deepseek/qclaw/...）"
+    [[ -n "$provider" ]] || die "--provider 必填（none/openai/deepseek/zeroentropy/qclaw/...）"
 
     # provider=none 只写 provider，其余置空，相当于关闭向量检索
     if [[ "$provider" == "none" ]]; then

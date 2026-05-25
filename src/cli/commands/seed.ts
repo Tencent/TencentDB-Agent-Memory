@@ -57,7 +57,7 @@ Examples:
 // Command handler
 // ============================
 
-async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Promise<void> {
+export async function runSeedCommand(opts: SeedCommandOptions, ctx: SeedCliContext): Promise<void> {
   const { logger } = ctx;
 
   logger.info(`${TAG} Starting seed command...`);

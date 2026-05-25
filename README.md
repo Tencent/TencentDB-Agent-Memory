@@ -246,6 +246,43 @@ docker exec -it hermes-memory hermes
 
 ---
 
+### 3. Existing Hermes Agent
+
+If Hermes is already installed on the host, install the memory provider into that existing agent instead of using the Docker image. The installer expects Hermes under `~/.hermes/hermes-agent`; when running as root for another account, pass `INSTALL_AS_USER=<user>`.
+
+```bash
+# Download the npm package globally so the install script is available.
+npm install -g @tencentdb-agent-memory/memory-tencentdb
+
+# Link memory_tencentdb into the existing Hermes plugin directory.
+INSTALL_SCRIPT="$(npm root -g)/@tencentdb-agent-memory/memory-tencentdb/scripts/install_hermes_memory_tencentdb.sh"
+bash "$INSTALL_SCRIPT"
+
+# Configure the Gateway used by the Hermes provider.
+CTL="$HOME/.memory-tencentdb/tdai-memory-openclaw-plugin/scripts/memory-tencentdb-ctl.sh"
+bash "$CTL" --hermes config llm \
+  --api-key "sk-..." \
+  --base-url "https://api.openai.com/v1" \
+  --model "gpt-4o"
+
+# Optional: enable remote embedding. ZeroEntropy uses its native embed API.
+bash "$CTL" --hermes config embedding \
+  --provider zeroentropy \
+  --api-key "$ZEROENTROPY_API_KEY" \
+  --base-url "https://api.zeroentropy.dev" \
+  --model "zembed-1" \
+  --dimensions 2560 \
+  --restart
+
+# Enable the Hermes memory provider and verify the Gateway.
+bash "$CTL" --hermes enable-hermes-memory
+curl http://127.0.0.1:8420/health
+```
+
+For OpenAI-compatible embedding providers, use the same `config embedding` command with `--provider openai` or your provider name, an OpenAI-compatible `--base-url`, model, and dimensions.
+
+---
+
 
 ## 🔧 Configurable Parameters
 
@@ -288,9 +325,9 @@ docker exec -it hermes-memory hermes
 <details>
 <summary><b>🔴 Level 3 · Full parameter reference</b> (ops / custom models / remote embedding)</summary>
 
-For all fields, types, and constraints see [`openclaw.plugin.json`](./openclaw.plugin.json)。
+For all fields, types, and constraints see [`openclaw.plugin.json`](./openclaw.plugin.json).
 
-- `embedding.*` — remote embedding service (OpenAI-compatible API)
+- `embedding.*` — remote embedding service (OpenAI-compatible API or ZeroEntropy native API)
 - `llm.*` — standalone LLM mode (bypass OpenClaw's built-in model and run L1/L2/L3 with a designated API)
 - `offload.backendUrl / backendApiKey` — offload the L1/L1.5/L2/L4 flow to a backend service
 - `report.*` — metrics reporting

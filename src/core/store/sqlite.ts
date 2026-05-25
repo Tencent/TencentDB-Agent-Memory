@@ -1046,7 +1046,7 @@ export class VectorStore implements IMemoryStore {
           tsEnd,
           record.createdAt,
           record.updatedAt,
-          JSON.stringify(record.metadata),
+          JSON.stringify({ ...record.metadata, scope: record.scope }),
         );
 
         if (!skipVec) {
@@ -1075,7 +1075,7 @@ export class VectorStore implements IMemoryStore {
               tsStr,
               tsStart,
               tsEnd,
-              JSON.stringify(record.metadata),
+              JSON.stringify({ ...record.metadata, scope: record.scope }),
             );
           } catch (ftsErr) {
             // FTS write failure is non-fatal — log and continue

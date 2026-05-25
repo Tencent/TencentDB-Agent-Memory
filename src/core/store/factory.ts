@@ -98,7 +98,9 @@ export function createStoreBundle(
           apiKey: config.embedding.apiKey,
           model: config.embedding.model,
           dimensions: config.embedding.dimensions,
+          proxyUrl: config.embedding.proxyUrl,
           maxInputChars: config.embedding.maxInputChars,
+          timeoutMs: config.embedding.timeoutMs,
         }, logger);
       }
 

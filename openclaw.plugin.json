@@ -56,6 +56,8 @@
         "properties": {
           "everyNConversations": { "type": "number", "default": 5, "description": "每 N 轮对话触发 L1 批处理" },
           "enableWarmup": { "type": "boolean", "default": true, "description": "Warm-up 模式：新 session 从 1 轮触发开始，每次 L1 后翻倍（1→2→4→...→everyN），加速早期记忆提取" },
+          "enableL2": { "type": "boolean", "default": true, "description": "是否启用 L2 场景归纳阶段。关闭后只保留 L0/L1 记忆，不再触发场景抽取。" },
+          "enableL3": { "type": "boolean", "default": true, "description": "是否启用 L3 用户画像生成阶段。关闭后 L2 完成也不会触发画像生成。" },
           "l1IdleTimeoutSeconds": { "type": "number", "default": 600, "description": "L1 空闲超时（秒）：用户停止对话后多久触发 L1 批处理" },
           "l2DelayAfterL1Seconds": { "type": "number", "default": 10, "description": "L1 完成后延迟多久触发 L2（秒）" },
           "l2MinIntervalSeconds": { "type": "number", "default": 900, "description": "同一 session 两次 L2 抽取的最小间隔（秒）" },
@@ -79,7 +81,7 @@
         "description": "向量搜索 (Embedding) 配置",
         "properties": {
           "enabled": { "type": "boolean", "default": true, "description": "是否启用向量搜索（若 provider=none，则实际会被禁用）" },
-          "provider": { "type": "string", "default": "none", "description": "Embedding 服务提供者：填写兼容 OpenAI API 的远端服务名称（如 openai、deepseek 等）；不填或填 none 则禁用向量搜索" },
+          "provider": { "type": "string", "default": "none", "description": "Embedding 服务提供者：填写远端服务名称（如 openai、deepseek、zeroentropy、qclaw 等）；zeroentropy 使用原生 /v1/models/embed 接口，其余默认按 OpenAI 兼容接口调用；不填或填 none 则禁用向量搜索" },
           "proxyUrl": { "type": "string", "description": "本地代理地址（仅 provider=qclaw 时必填）。配置后 embedding 请求将通过该代理转发，原始 baseUrl 作为 Remote-URL 头传递" },
           "baseUrl": { "type": "string", "description": "API Base URL（必填）：填写对应 provider 的 API 地址" },
           "apiKey": { "type": "string", "description": "API Key（必填）" },
@@ -131,7 +133,8 @@
           "apiKey": { "type": "string", "description": "API Key" },
           "model": { "type": "string", "default": "gpt-4o", "description": "模型名称（如 gpt-4o, deepseek-v3, claude-sonnet-4-6）" },
           "maxTokens": { "type": "number", "default": 4096, "description": "最大输出 token 数" },
-          "timeoutMs": { "type": "number", "default": 120000, "description": "请求超时（毫秒）" }
+          "timeoutMs": { "type": "number", "default": 120000, "description": "请求超时（毫秒）" },
+          "providerOptions": { "type": "object", "additionalProperties": true, "description": "透传给 AI SDK providerOptions 的供应商专属参数，例如关闭 thinking 或设置 extraBody。" }
         }
       },
       "offload": {
@@ -152,7 +155,9 @@
           "mmdMaxTokenRatio": { "type": "number", "default": 0.2, "description": "MMD 注入 token 预算比例" },
           "backendUrl": { "type": "string", "description": "后端服务 URL（如 https://offload-api.example.com），配置后 L1/L1.5/L2/L4 走后端" },
           "backendApiKey": { "type": "string", "description": "后端 API 认证 token" },
-          "backendTimeoutMs": { "type": "number", "default": 10000, "description": "后端调用超时（毫秒）" }
+          "backendTimeoutMs": { "type": "number", "default": 10000, "description": "后端调用超时（毫秒）" },
+          "allowInsecureTls": { "type": "boolean", "default": false, "description": "是否显式允许 HTTPS 后端跳过证书校验。默认 false；仅本地调试或内网自签证书临时使用。" },
+          "backendCaPemPath": { "type": "string", "description": "HTTPS 后端自定义 CA 证书 PEM 路径。优先用于自签/企业 CA，避免关闭证书校验。" }
         }
       }
     }
