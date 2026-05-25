@@ -147,19 +147,6 @@ export async function extractL1Memories(params: {
     return { success: true, extractedCount: 0, storedCount: 0, records: [], sceneNames: [] };
   }
 
-  // ── Step 0: Rule-based pre-extraction (v3.1) ──
-  // Catch obvious persona/instruction patterns BEFORE the LLM call.
-  // This reduces token cost for clear patterns and provides hints to the LLM.
-  const preResult = preExtractMemories(qualifiedMessages);
-  if (preResult.direct.length > 0) {
-    logger?.debug?.(
-      `${TAG} Pre-extracted ${preResult.direct.length} HIGH-confidence items directly (bypass LLM)`);
-  }
-  if (preResult.hints.length > 0) {
-    logger?.debug?.(
-      `${TAG} Pre-extracted ${preResult.hints.length} MEDIUM-confidence hints for LLM guidance`);
-  }
-
   // Split messages into background (older) + new (recent)
   const newMessages = qualifiedMessages.slice(-maxNewMessages);
   const bgEndIdx = qualifiedMessages.length - newMessages.length;
@@ -168,6 +155,15 @@ export async function extractL1Memories(params: {
     : [];
 
   logger?.debug?.(`${TAG} Extracting from ${newMessages.length} new messages (+ ${backgroundMessages.length} background) [${qualifiedMessages.length} qualified from ${messages.length} input]`);
+
+  // ── Step 0: Rule-based pre-extraction (v3.1) ──
+  // Catch obvious persona/instruction patterns BEFORE the LLM call.
+  // Only scan newMessages to avoid extracting from background context.
+  const preResult = preExtractMemories(newMessages);
+  if (preResult.direct.length > 0) {
+    logger?.debug?.(
+      `${TAG} Pre-extracted ${preResult.direct.length} HIGH-confidence items directly (bypass LLM)`);
+  }
 
   // Step 1: LLM extraction (scene segmentation + memory extraction)
   let scenes: SceneSegment[];
@@ -338,7 +334,7 @@ export async function extractL1Memories(params: {
 /**
  * Call LLM to extract scene-segmented memories from conversation messages.
  */
-async function callLlmExtraction(params: {
+export async function callLlmExtraction(params: {
   newMessages: ConversationMessage[];
   backgroundMessages: ConversationMessage[];
   previousSceneName?: string;
@@ -579,7 +575,7 @@ async function storeAllDirectly(
  * Validate an LLM-extracted memory against basic quality heuristics.
  * Returns false if the memory appears to be hallucinated or too low-quality.
  */
-function passesConfidenceCheck(
+export function passesConfidenceCheck(
   mem: ExtractedMemory,
   allMessages: ConversationMessage[],
   logger?: Logger,
