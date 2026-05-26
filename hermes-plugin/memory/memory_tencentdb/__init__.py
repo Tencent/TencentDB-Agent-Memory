@@ -702,7 +702,19 @@ class MemoryTencentdbProvider(MemoryProvider):
             Gateway is ready.
         """
         self._session_id = session_id
-        self._user_id = kwargs.get("user_id", "default")
+        user_id = kwargs.get("user_id", "default")
+        # Multi-profile isolation: prepend profile name to user_id so that
+        # different Hermes profiles (default, xiaoling, xiaoxi, etc.) get
+        # isolated memories even when talking from the same platform user.
+        # Hermes passes agent_identity=profile_name but the original TDAI
+        # plugin ignored it — this fix ensures per-profile memory separation.
+        agent_identity = str(kwargs.get("agent_identity") or "").strip()
+        if agent_identity:
+            self._user_id = f"{agent_identity}:{user_id}"
+        else:
+            self._user_id = user_id
+        
+        self._agent_identity = agent_identity or "default"
 
         host = _resolve_gateway_host()
         port = _resolve_gateway_port()
@@ -798,6 +810,9 @@ class MemoryTencentdbProvider(MemoryProvider):
             return ""
 
         effective_session = session_id or self._session_id
+        # Add agent_identity prefix for multi-agent isolation: "agent:{profile}:{session_id}"
+        if self._agent_identity:
+            effective_session = f"agent:{self._agent_identity}:{effective_session}"
         try:
             result = self._client.recall(
                 query=query,
@@ -846,6 +861,9 @@ class MemoryTencentdbProvider(MemoryProvider):
             return
 
         effective_session = session_id or self._session_id
+        # Add agent_identity prefix for multi-agent isolation
+        if self._agent_identity:
+            effective_session = f"agent:{self._agent_identity}:{effective_session}"
         client = self._client
 
         def _sync():

@@ -242,7 +242,8 @@ export class TdaiGateway {
     this.logger.info(`Recall completed in ${elapsed}ms: context=${(result.appendSystemContext?.length ?? 0)} chars`);
 
     const response: RecallResponse = {
-      context: result.appendSystemContext ?? "",
+      // Multi-agent fix: Include prependContext (L1 memories) in the response
+      context: [result.prependContext, result.appendSystemContext].filter(Boolean).join("\n\n"),
       strategy: result.recallStrategy,
       memory_count: result.recalledL1Memories?.length ?? 0,
     };

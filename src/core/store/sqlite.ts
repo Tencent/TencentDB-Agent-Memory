@@ -607,12 +607,15 @@ export class VectorStore implements IMemoryStore {
     }
 
     // Prepare statements for reuse
+    // Multi-agent isolation: add agent_id column
+    try { this.db.exec("ALTER TABLE l1_records ADD COLUMN agent_id TEXT DEFAULT ''"); } catch { /* column exists */ }
+    
     this.stmtUpsertMeta = this.db.prepare(`
       INSERT INTO l1_records (
         record_id, content, type, priority, scene_name, session_key, session_id,
         timestamp_str, timestamp_start, timestamp_end,
-        created_time, updated_time, metadata_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        created_time, updated_time, metadata_json, agent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(record_id) DO UPDATE SET
         content=excluded.content,
         type=excluded.type,
@@ -622,7 +625,8 @@ export class VectorStore implements IMemoryStore {
         timestamp_start=excluded.timestamp_start,
         timestamp_end=excluded.timestamp_end,
         updated_time=excluded.updated_time,
-        metadata_json=excluded.metadata_json
+        metadata_json=excluded.metadata_json,
+        agent_id=excluded.agent_id
     `);
 
     if (this.dimensions > 0) {
@@ -633,7 +637,7 @@ export class VectorStore implements IMemoryStore {
 
     this.stmtGetMeta = this.db.prepare(`
       SELECT content, type, priority, scene_name, session_key, session_id,
-             timestamp_str, timestamp_start, timestamp_end, metadata_json
+             timestamp_str, timestamp_start, timestamp_end, metadata_json, agent_id
       FROM l1_records WHERE record_id = ?
     `);
 
@@ -800,12 +804,13 @@ export class VectorStore implements IMemoryStore {
       this.stmtL1FtsDelete = this.db.prepare("DELETE FROM l1_fts WHERE record_id = ?");
 
       this.stmtL1FtsSearch = this.db.prepare(`
-        SELECT record_id, content_original AS content, type, priority, scene_name,
-               session_key, session_id, timestamp_str, timestamp_start, timestamp_end,
-               metadata_json,
+        SELECT f.record_id, f.content_original AS content, f.type, f.priority, f.scene_name,
+               f.session_key, f.session_id, f.timestamp_str, f.timestamp_start, f.timestamp_end,
+               f.metadata_json,
                bm25(l1_fts) AS rank
-        FROM l1_fts
-        WHERE l1_fts MATCH ?
+        FROM l1_fts f
+        JOIN l1_records r ON f.record_id = r.record_id
+        WHERE f MATCH ? AND r.agent_id IN ('shared', ?)
         ORDER BY rank ASC
         LIMIT ?
       `);
@@ -1032,6 +1037,16 @@ export class VectorStore implements IMemoryStore {
 
       this.db.exec("BEGIN");
       try {
+        // Multi-agent isolation: compute agent_id
+        let agentId = "default";
+        if (record.sessionKey.startsWith("agent:")) {
+          agentId = record.sessionKey.split(":")[1] || "default";
+        }
+        // Shared memory: instruction and persona are global
+        if (record.type === "instruction" || record.type === "persona") {
+          agentId = "shared";
+        }
+
         // Upsert metadata (INSERT OR UPDATE)
         this.stmtUpsertMeta.run(
           recordId,
@@ -1047,6 +1062,7 @@ export class VectorStore implements IMemoryStore {
           record.createdAt,
           record.updatedAt,
           JSON.stringify(record.metadata),
+          agentId,
         );
 
         if (!skipVec) {
@@ -1109,7 +1125,7 @@ export class VectorStore implements IMemoryStore {
    * **Fault-tolerant**: returns an empty array on any error (e.g. dimension
    * mismatch, corrupted DB) so callers can fall back to keyword search.
    */
-  searchL1Vector(queryEmbedding: Float32Array, topK = 5): VectorSearchResult[] {
+  searchL1Vector(queryEmbedding: Float32Array, topK = 5, agentIdentity = "default"): VectorSearchResult[] {
     if (this.degraded || !this.vecTablesReady) {
       if (this.degraded) this.logger?.warn(`${TAG} [L1-search] SKIPPED (degraded mode)`);
       return [];
@@ -1169,6 +1185,12 @@ export class VectorStore implements IMemoryStore {
 
         if (!meta) {
           this.logger?.warn(`${TAG} [L1-search] record_id=${record_id} has vector but NO metadata (orphan)`);
+          continue;
+        }
+
+        // Multi-agent isolation: check agent_id
+        const metaAgentId = (meta as any).agent_id || "default";
+        if (metaAgentId !== "shared" && metaAgentId !== agentIdentity) {
           continue;
         }
 
@@ -2026,10 +2048,10 @@ export class VectorStore implements IMemoryStore {
    *
    * **Fault-tolerant**: returns an empty array on any error.
    */
-  searchL1Fts(ftsQuery: string, limit = 20): FtsSearchResult[] {
+  searchL1Fts(ftsQuery: string, limit = 20, agentIdentity = "default"): FtsSearchResult[] {
     if (this.degraded || !this.ftsAvailable) return [];
     try {
-      const rows = this.stmtL1FtsSearch.all(ftsQuery, limit) as Array<{
+      const rows = this.stmtL1FtsSearch.all(ftsQuery, agentIdentity, limit) as Array<{
         record_id: string;
         content: string;
         type: string;
