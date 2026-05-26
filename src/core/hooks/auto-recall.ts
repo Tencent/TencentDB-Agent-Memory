@@ -24,6 +24,7 @@ import { sanitizeText } from "../../utils/sanitize.js";
 const TAG = "[memory-tdai] [recall]";
 const RECALL_TRUNCATION_SUFFIX = "…（已截断；可用 tdai_memory_search 或 tdai_conversation_search 查看详情）";
 const MIN_TRUNCATED_RECALL_LINE_CHARS = 40;
+const RECALL_LINE_SEPARATOR = "\n";
 
 /**
  * Memory tools usage guide — injected at the end of memory context so the
@@ -209,7 +210,7 @@ async function performAutoRecallInner(params: {
   let prependContext: string | undefined;
   if (memoryLines.length > 0) {
     prependContext =
-      `<relevant-memories>\n以下是当前对话召回的相关记忆，不代表当前任务进程，仅作为参考：\n\n${memoryLines.join("\n")}\n</relevant-memories>`;
+      `<relevant-memories>\n以下是当前对话召回的相关记忆，不代表当前任务进程，仅作为参考：\n\n${memoryLines.join(RECALL_LINE_SEPARATOR)}\n</relevant-memories>`;
   }
 
   // Append memory tools usage guide to the stable part so the agent knows
@@ -731,14 +732,15 @@ function applyRecallBudget(
     const perMemoryBounded = maxCharsPerMemory
       ? truncateRecallLine(line, maxCharsPerMemory)
       : line;
-    if (perMemoryBounded !== line) truncatedCount++;
+    let wasTruncated = perMemoryBounded !== line;
 
     if (!maxTotalRecallChars) {
       budgeted.push(perMemoryBounded);
+      if (wasTruncated) truncatedCount++;
       continue;
     }
 
-    const separatorChars = budgeted.length > 0 ? 1 : 0;
+    const separatorChars = budgeted.length > 0 ? RECALL_LINE_SEPARATOR.length : 0;
     const remainingChars = maxTotalRecallChars - usedChars - separatorChars;
     if (remainingChars <= 0) {
       droppedCount += lines.length - i;
@@ -746,20 +748,21 @@ function applyRecallBudget(
     }
 
     if (perMemoryBounded.length > remainingChars) {
-      if (remainingChars >= MIN_TRUNCATED_RECALL_LINE_CHARS) {
+      const canFit = remainingChars >= MIN_TRUNCATED_RECALL_LINE_CHARS;
+      if (canFit) {
         const totalBounded = truncateRecallLine(perMemoryBounded, remainingChars);
         budgeted.push(totalBounded);
         usedChars += separatorChars + totalBounded.length;
-        if (totalBounded !== perMemoryBounded) truncatedCount++;
-      } else {
-        droppedCount++;
+        wasTruncated ||= totalBounded !== perMemoryBounded;
+        if (wasTruncated) truncatedCount++;
       }
-      droppedCount += lines.length - i - 1;
+      droppedCount += lines.length - i - (canFit ? 1 : 0);
       break;
     }
 
     budgeted.push(perMemoryBounded);
     usedChars += separatorChars + perMemoryBounded.length;
+    if (wasTruncated) truncatedCount++;
   }
 
   if (truncatedCount > 0 || droppedCount > 0) {

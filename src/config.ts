@@ -490,8 +490,8 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
     recall: {
       enabled: bool(recallGroup, "enabled") ?? true,
       maxResults: num(recallGroup, "maxResults") ?? 5,
-      maxCharsPerMemory: normalizeNonNegativeInt(num(recallGroup, "maxCharsPerMemory"), 800),
-      maxTotalRecallChars: normalizeNonNegativeInt(num(recallGroup, "maxTotalRecallChars"), 3000),
+      maxCharsPerMemory: num(recallGroup, "maxCharsPerMemory") ?? 0,
+      maxTotalRecallChars: num(recallGroup, "maxTotalRecallChars") ?? 0,
       scoreThreshold: num(recallGroup, "scoreThreshold") ?? 0.3,
       strategy: validateStrategy(str(recallGroup, "strategy")) ?? "hybrid",
       timeoutMs: num(recallGroup, "timeoutMs") ?? 5000,
@@ -570,12 +570,6 @@ function optStr(src: Record<string, unknown>, key: string): string | undefined {
 function num(src: Record<string, unknown>, key: string): number | undefined {
   const v = src[key];
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
-}
-
-function normalizeNonNegativeInt(value: number | undefined, fallback: number): number {
-  if (value == null) return fallback;
-  if (value < 0) return fallback;
-  return Math.floor(value);
 }
 
 function bool(src: Record<string, unknown>, key: string): boolean | undefined {
