@@ -75,6 +75,21 @@ export interface PipelineTriggerConfig {
 }
 
 /** Recall settings — controls memory retrieval for context injection. */
+export interface RecallRerankConfig {
+  /** Enable remote rerank for L1 recall candidates (default: false). */
+  enabled: boolean;
+  /** OpenAI-compatible rerank API base URL. "/rerank" is appended when omitted. */
+  baseUrl?: string;
+  /** API key for the rerank provider. */
+  apiKey?: string;
+  /** Rerank model name. */
+  model?: string;
+  /** Request timeout in milliseconds (default: 3000). */
+  timeoutMs: number;
+  /** Candidate multiplier before rerank, relative to recall.maxResults (default: 3). */
+  candidateMultiplier: number;
+}
+
 export interface RecallConfig {
   /** Enable auto-recall (default: true) */
   enabled: boolean;
@@ -86,6 +101,8 @@ export interface RecallConfig {
   strategy: "embedding" | "keyword" | "hybrid";
   /** Overall recall timeout in milliseconds (default: 5000). When exceeded, recall is skipped with a warning. */
   timeoutMs: number;
+  /** Optional remote rerank configuration. Disabled by default. */
+  rerank: RecallRerankConfig;
 }
 
 /** Embedding service configuration for vector search. */
@@ -322,6 +339,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
 
   // --- Recall ---
   const recallGroup = obj(c, "recall");
+  const rerankGroup = obj(recallGroup, "rerank");
 
   // --- Embedding ---
   const embeddingGroup = obj(c, "embedding");
@@ -489,6 +507,14 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
       scoreThreshold: num(recallGroup, "scoreThreshold") ?? 0.3,
       strategy: validateStrategy(str(recallGroup, "strategy")) ?? "hybrid",
       timeoutMs: num(recallGroup, "timeoutMs") ?? 5000,
+      rerank: {
+        enabled: bool(rerankGroup, "enabled") ?? false,
+        baseUrl: str(rerankGroup, "baseUrl"),
+        apiKey: str(rerankGroup, "apiKey"),
+        model: str(rerankGroup, "model"),
+        timeoutMs: num(rerankGroup, "timeoutMs") ?? 3000,
+        candidateMultiplier: num(rerankGroup, "candidateMultiplier") ?? 3,
+      },
     },
     embedding: {
       enabled: embeddingEnabled,

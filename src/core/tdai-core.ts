@@ -295,6 +295,7 @@ export class TdaiCore {
       scene: params.scene,
       vectorStore: this.vectorStore,
       embeddingService: this.embeddingService,
+      rerank: this.cfg.recall.rerank,
       logger: this.logger,
     });
 
