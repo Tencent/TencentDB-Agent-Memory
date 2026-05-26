@@ -137,20 +137,29 @@ export function shouldExtractL1(text: string): boolean {
   if (!shouldCaptureL0(text)) return false;
 
   // ── Length filters ──
-  // const isCJK = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(text);
-  // if (isCJK && text.length < 2) return false;
-  // if (!isCJK && text.length < 2) return false;
-  // if (text.length > 5000) return false;
+  // CJK languages need fewer characters to carry meaning than alphabetic ones.
+  // Minimum meaningful lengths: CJK >= 4 chars, alphabetic >= 10 chars.
+  // Overly short messages are almost never worth extracting memories from.
+  const isCJK = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(text);
+  if (isCJK && text.length < 4) return false;
+  if (!isCJK && text.length < 10) return false;
+  // Reject excessively long messages (e.g. pasted logs) — they will be handled
+  // by truncation in the LLM prompt rather than extraction.
+  if (text.length > 5000) return false;
 
   // ── Content-quality filters ──
   // Match strings composed entirely of non-word, non-space, non-CJK characters (1–5 chars).
   if (/^[^\w\s\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]{1,5}$/.test(text)) return false;
   if (/^[?？]+$/.test(text)) return false;
 
+  // ── Noise filters ──
+  // Purely conversational fillers ("好的", "嗯", "OK", "thanks") carry no extractable memory.
+  if (/^(好的|嗯嗯?|哦哦?|OK|ok|thanks|thank you|got it|明白了|收到)[!！.]*$/i.test(text.trim())) return false;
+
   // ── Security filters ──
   // Reject prompt-injection payloads — prevent malicious content from being
   // persisted into structured memory and re-injected on future recalls.
-  // if (looksLikePromptInjection(text)) return false;
+  if (looksLikePromptInjection(text)) return false;
 
   return true;
 }
@@ -202,8 +211,8 @@ const PROMPT_INJECTION_PATTERNS: RegExp[] = [
   /\b(run|execute|call|invoke)\b.{0,40}\b(tool|command|function|shell)\b/i,
 
   // ── Chinese variants ──
-  /忽略(?:所有|之前|以上|先前)?(?:的)?(?:指令|规则|指示|说明)/,
-  /无视(?:所有|之前|以上)?(?:的)?(?:指令|规则|限制)/,
+  /忽略.{0,10}(?:指令|规则|指示|说明|限制)/,
+  /无视.{0,10}(?:指令|规则|限制)/,
   /(?:显示|输出|告诉我|给我看)(?:你的)?(?:系统|初始|隐藏)?(?:提示词|指令|规则|prompt)/,
   /你(?:现在|从现在开始)是/,            // "你现在是 DAN"
 ];
