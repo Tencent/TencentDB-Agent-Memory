@@ -13,6 +13,8 @@
 import type { IMemoryStore, L1SearchResult } from "../store/types.js";
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService } from "../store/embedding.js";
+import type { RecallRerankConfig } from "../../config.js";
+import { getRerankCandidateLimit, rerankCandidates } from "../recall/reranker.js";
 
 // ============================
 // Types
@@ -92,6 +94,7 @@ export async function executeMemorySearch(params: {
   scene?: string;
   vectorStore?: IMemoryStore;
   embeddingService?: EmbeddingService;
+  rerank?: RecallRerankConfig;
   logger?: Logger;
 }): Promise<MemorySearchResult> {
   const {
@@ -101,6 +104,7 @@ export async function executeMemorySearch(params: {
     scene: sceneFilter,
     vectorStore,
     embeddingService,
+    rerank,
     logger,
   } = params;
 
@@ -139,7 +143,8 @@ export async function executeMemorySearch(params: {
   }
 
   // ── Over-retrieve for later filtering and RRF merging ──
-  const candidateK = limit * 3;
+  const rerankCandidateLimit = getRerankCandidateLimit(limit, rerank);
+  const candidateK = Math.max(limit * 3, rerankCandidateLimit);
 
   // ── Run available search strategies in parallel ──
   const [ftsItems, vecItems] = await Promise.all([
@@ -245,8 +250,15 @@ export async function executeMemorySearch(params: {
     logger?.debug?.(`${TAG} After scene filter "${sceneFilter}": ${results.length}/${preFilterCount}`);
   }
 
-  // ── Trim to requested limit ──
-  const trimmed = results.slice(0, limit);
+  // ── Optional remote rerank, then trim to requested limit ──
+  const trimmed = await rerankCandidates({
+    query,
+    candidates: results.slice(0, rerankCandidateLimit),
+    topN: limit,
+    config: rerank,
+    getDocumentText: formatRerankDocument,
+    logger,
+  });
 
   logger?.debug?.(
     `${TAG} RESULT (strategy=${strategy}): returning ${trimmed.length} memories ` +
@@ -258,6 +270,11 @@ export async function executeMemorySearch(params: {
     total: trimmed.length,
     strategy,
   };
+}
+
+function formatRerankDocument(item: MemorySearchResultItem): string {
+  const scene = item.scene_name ? ` scene=${item.scene_name}` : "";
+  return `[${item.type}${scene}] ${item.content}`;
 }
 
 // ============================

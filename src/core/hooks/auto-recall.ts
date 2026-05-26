@@ -20,6 +20,7 @@ import type { IMemoryStore, L1SearchResult, L1FtsResult } from "../store/types.j
 import { buildFtsQuery } from "../store/sqlite.js";
 import type { EmbeddingService, EmbeddingCallOptions } from "../store/embedding.js";
 import { sanitizeText } from "../../utils/sanitize.js";
+import { getRerankCandidateLimit, rerankTextCandidates } from "../recall/reranker.js";
 
 const TAG = "[memory-tdai] [recall]";
 
@@ -331,7 +332,8 @@ async function searchMemories(
     );
   }
 
-  const maxResults = cfg.recall.maxResults ?? 5;
+  const maxResults = normalizePositiveInt(cfg.recall.maxResults, 5);
+  const candidateLimit = getRerankCandidateLimit(maxResults, cfg.recall.rerank);
   const threshold = cfg.recall.scoreThreshold ?? 0.3;
 
   const embeddingAvailable = !!vectorStore && !!embeddingService;
@@ -340,7 +342,7 @@ async function searchMemories(
     `${TAG} [searchMemories] strategy=${strategy}, embeddingAvailable=${embeddingAvailable}, ` +
     `vectorStore=${vectorStore ? "available" : "UNAVAILABLE"}, ` +
     `embeddingService=${embeddingService ? "available" : "UNAVAILABLE"}, ` +
-    `maxResults=${maxResults}, threshold=${threshold}`,
+    `maxResults=${maxResults}, candidateLimit=${candidateLimit}, threshold=${threshold}`,
   );
 
   // Determine effective strategy (fall back to keyword if embedding not available)
@@ -362,14 +364,26 @@ async function searchMemories(
   try {
     if (effectiveStrategy === "keyword") {
       const tFts = performance.now();
-      const lines = await searchByKeyword(cleanText, pluginDataDir, maxResults, threshold, logger, vectorStore);
-      return { lines, timing: { ftsMs: performance.now() - tFts, embeddingMs: 0, ftsHits: lines.length, embeddingHits: 0 } };
+      const lines = await searchByKeyword(cleanText, pluginDataDir, candidateLimit, threshold, logger, vectorStore);
+      return await finalizeSearchResult(
+        { lines, timing: { ftsMs: performance.now() - tFts, embeddingMs: 0, ftsHits: lines.length, embeddingHits: 0 } },
+        cleanText,
+        cfg,
+        logger,
+        maxResults,
+      );
     }
 
     if (effectiveStrategy === "embedding") {
       const tEmb = performance.now();
-      const lines = await searchByEmbedding(cleanText, maxResults, threshold, vectorStore!, embeddingService!, logger, embeddingCallOpts);
-      return { lines, timing: { ftsMs: 0, embeddingMs: performance.now() - tEmb, ftsHits: 0, embeddingHits: lines.length } };
+      const lines = await searchByEmbedding(cleanText, candidateLimit, threshold, vectorStore!, embeddingService!, logger, embeddingCallOpts);
+      return await finalizeSearchResult(
+        { lines, timing: { ftsMs: 0, embeddingMs: performance.now() - tEmb, ftsHits: 0, embeddingHits: lines.length } },
+        cleanText,
+        cfg,
+        logger,
+        maxResults,
+      );
     }
 
     // Hybrid: if the store natively supports hybrid search (e.g. TCVDB does
@@ -377,19 +391,49 @@ async function searchMemories(
     // to avoid a redundant second HTTP request and a wasted local embed().
     if (vectorStore?.getCapabilities().nativeHybridSearch) {
       const tNative = performance.now();
-      const results = await vectorStore.searchL1Hybrid({ query: cleanText, topK: maxResults });
+      const results = await vectorStore.searchL1Hybrid({ query: cleanText, topK: candidateLimit });
       const nativeMs = performance.now() - tNative;
       logger?.debug?.(`${TAG} [hybrid-native] Single-call hybrid: ${results.length} results in ${nativeMs.toFixed(0)}ms`);
       const lines = results.map((r) => formatMemoryLine(vectorResultToFormatable(r)));
-      return { lines, timing: { ftsMs: 0, embeddingMs: nativeMs, ftsHits: 0, embeddingHits: results.length } };
+      return await finalizeSearchResult(
+        { lines, timing: { ftsMs: 0, embeddingMs: nativeMs, ftsHits: 0, embeddingHits: results.length } },
+        cleanText,
+        cfg,
+        logger,
+        maxResults,
+      );
     }
 
     // Fallback: run keyword + embedding in parallel, merge with client-side RRF (SQLite path)
-    return await searchHybrid(cleanText, pluginDataDir, maxResults, threshold, vectorStore!, embeddingService!, logger, embeddingCallOpts);
+    return await finalizeSearchResult(
+      await searchHybrid(cleanText, pluginDataDir, candidateLimit, threshold, vectorStore!, embeddingService!, logger, embeddingCallOpts),
+      cleanText,
+      cfg,
+      logger,
+      maxResults,
+    );
   } catch (err) {
     logger?.warn?.(`${TAG} Memory search failed (strategy=${effectiveStrategy}): ${err instanceof Error ? err.message : String(err)}`);
     return emptyResult;
   }
+}
+
+async function finalizeSearchResult(
+  result: SearchResult,
+  query: string,
+  cfg: MemoryTdaiConfig,
+  logger: Logger | undefined,
+  maxResults: number,
+): Promise<SearchResult> {
+  if (result.lines.length === 0) return result;
+  const lines = await rerankTextCandidates({
+    query,
+    documents: result.lines,
+    topN: maxResults,
+    config: cfg.recall.rerank,
+    logger,
+  });
+  return { ...result, lines };
 }
 
 // ============================
@@ -723,6 +767,11 @@ function formatTimestamp(ts: string | undefined): string | undefined {
     return datePart;
   }
   return `${datePart} ${timePart}`;
+}
+
+function normalizePositiveInt(value: number | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) return fallback;
+  return Math.floor(value);
 }
 
 /**

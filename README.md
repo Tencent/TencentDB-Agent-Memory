@@ -275,6 +275,7 @@ docker exec -it hermes-memory hermes
 | `pipeline.l1IdleTimeoutSeconds` | `600` | Trigger L1 after the user has been idle for this many seconds |
 | `pipeline.l2MinIntervalSeconds` | `900` | Minimum interval between two L2 passes within the same session |
 | `recall.timeoutMs` | `5000` | Recall timeout; on timeout, skip injection without blocking the conversation |
+| `recall.rerank.enabled` | `false` | Optional remote rerank for L1 recall candidates; falls back to the original order on timeout or API failure |
 | `extraction.enableDedup` | `true` | L1 vector dedup / conflict detection |
 | `capture.excludeAgents` | `[]` | Glob patterns to exclude specific agents (e.g. `bench-judge-*`) |
 | `capture.l0l1RetentionDays` | `0` | Local retention days for L0 / L1 files; `0` = never clean up |
@@ -291,6 +292,7 @@ docker exec -it hermes-memory hermes
 For all fields, types, and constraints see [`openclaw.plugin.json`](./openclaw.plugin.json)。
 
 - `embedding.*` — remote embedding service (OpenAI-compatible API)
+- `recall.rerank.*` — remote rerank service compatible with `/rerank` APIs
 - `llm.*` — standalone LLM mode (bypass OpenClaw's built-in model and run L1/L2/L3 with a designated API)
 - `offload.backendUrl / backendApiKey` — offload the L1/L1.5/L2/L4 flow to a backend service
 - `report.*` — metrics reporting

@@ -279,6 +279,7 @@ docker exec -it hermes-memory hermes
 | `pipeline.l1IdleTimeoutSeconds` | `600` | 用户停止对话多久后触发 L1 |
 | `pipeline.l2MinIntervalSeconds` | `900` | 同 session 两次 L2 之间的最小间隔 |
 | `recall.timeoutMs` | `5000` | 召回超时阈值，超时跳过注入不阻塞对话 |
+| `recall.rerank.enabled` | `false` | 可选远程 rerank，用于重排 L1 召回候选；超时或 API 失败时回退原排序 |
 | `extraction.enableDedup` | `true` | L1 向量去重 / 冲突检测 |
 | `capture.excludeAgents` | `[]` | Glob 模式排除特定 Agent（如 `bench-judge-*`） |
 | `capture.l0l1RetentionDays` | `0` | L0/L1 本地文件保留天数，`0` = 永不清理 |
@@ -295,6 +296,7 @@ docker exec -it hermes-memory hermes
 完整字段、类型、约束见 [`openclaw.plugin.json`](./openclaw.plugin.json) 。
 
 - `embedding.*` — 远程 embedding 服务（OpenAI 兼容 API）
+- `recall.rerank.*` — 兼容 `/rerank` API 的远程 rerank 服务
 - `llm.*` — 独立 LLM 模式（绕过 OpenClaw 内置模型，用指定 API 跑 L1/L2/L3）
 - `offload.backendUrl / backendApiKey` — 将 L1/L1.5/L2/L4 offload 流程卸载到后端服务
 - `report.*` — 指标上报
