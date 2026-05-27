@@ -68,10 +68,12 @@ export async function batchDedup(params: {
   conflictRecallTopK?: number;
   /** Override embedding timeout for capture-path calls (milliseconds) */
   embeddingTimeoutMs?: number;
+  /** Global lane name for the embedded agent run. */
+  lane?: string;
   /** Host-neutral LLM runner — when provided, used instead of CleanContextRunner. */
   llmRunner?: LLMRunner;
 }): Promise<DedupDecision[]> {
-  const { memories, config, logger, model, vectorStore, embeddingService, llmRunner } = params;
+  const { memories, config, logger, model, vectorStore, embeddingService, llmRunner, lane } = params;
   const topK = params.conflictRecallTopK ?? 5;
 
   if (memories.length === 0) {
@@ -139,7 +141,7 @@ export async function batchDedup(params: {
   }
 
   // Phase 2: Batch LLM judgment
-  return runLlmJudgment(matches, memories, config, logger, model, llmRunner);
+  return runLlmJudgment(matches, memories, config, logger, model, lane, llmRunner);
 }
 
 /**
@@ -151,6 +153,7 @@ async function runLlmJudgment(
   config: unknown,
   logger: Logger | undefined,
   model: string | undefined,
+  lane: string | undefined,
   llmRunner?: LLMRunner,
 ): Promise<DedupDecision[]> {
   logger?.debug?.(`${TAG} Running batch conflict detection for ${memories.length} memories`);
@@ -172,6 +175,7 @@ async function runLlmJudgment(
       const runner = new CleanContextRunner({
         config,
         modelRef: model,
+        lane,
         enableTools: false,
         logger,
       });
