@@ -466,7 +466,7 @@ export function createL2Runner(opts: {
         logger.debug?.(
           `${TAG} [L2] No new L1 records since cursor (session=${sessionKey}, updatedAfter=${cursor ?? "(full)"}), skipping scene extraction`,
         );
-        return;
+        return { latestCursor: cursor || undefined };
       }
 
       logger.debug?.(
@@ -497,7 +497,7 @@ export function createL2Runner(opts: {
 
       if (sessionRecords.length === 0) {
         logger.debug?.(`${TAG} [L2] No new L1 records found (JSONL fallback, session=${sessionKey}), skipping scene extraction`);
-        return;
+        return { latestCursor: cursor || undefined };
       }
 
       records = sessionRecords.map((r) => ({
