@@ -1,0 +1,164 @@
+{
+  "id": "memory-tencentdb",
+  "name": "Memory (TencentDB)",
+  "description": "Four-layer memory system — auto-captures, structures, and profiles conversational knowledge",
+  "commandAliases": ["memory-tdai"],
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["tdai_memory_search", "tdai_conversation_search"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "storeBackend": {
+        "type": "string",
+        "enum": ["sqlite", "tcvdb"],
+        "default": "sqlite",
+        "description": "存储后端：sqlite（本地 SQLite + sqlite-vec）或 tcvdb（腾讯云向量数据库）"
+      },
+      "capture": {
+        "type": "object",
+        "description": "对话自动捕获设置 (L0)",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true, "description": "是否启用自动对话捕获" },
+          "excludeAgents": { "type": "array", "items": { "type": "string" }, "default": [], "description": "排除的 Agent glob 模式列表（如 bench-judge-*），匹配的 agent 不会被捕获、召回或参与 pipeline 调度" },
+          "l0l1RetentionDays": { "type": "number", "default": 0, "description": "L0/L1 本地文件保留天数（单位天）。0=不清理；非0时默认必须>=3。若为1或2，需显式开启 allowAggressiveCleanup" },
+          "allowAggressiveCleanup": { "type": "boolean", "default": false, "description": "是否允许高风险清理配置（l0l1RetentionDays=1或2）" },
+          "cleanTime": { "type": "string", "default": "03:00", "description": "每日清理执行时间（HH:mm）" }
+        }
+      },
+      "extraction": {
+        "type": "object",
+        "description": "记忆提取设置 (L1)",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true, "description": "是否启用后台提取" },
+          "enableDedup": { "type": "boolean", "default": true, "description": "L1 智能去重（基于向量相似度或关键词进行冲突检测）" },
+          "maxMemoriesPerSession": { "type": "number", "default": 20, "description": "单次 L1 提取每 session 最大记忆条数" },
+          "model": { "type": "string", "description": "提取使用模型 (格式: provider/model)，未填写时使用openclaw默认模型" }
+        }
+      },
+      "persona": {
+        "type": "object",
+        "description": "场景归纳与用户画像设置 (L2/L3)",
+        "properties": {
+          "triggerEveryN": { "type": "number", "default": 50, "description": "每 N 条新记忆触发画像生成" },
+          "maxScenes": { "type": "number", "default": 15, "description": "最大场景数" },
+          "backupCount": { "type": "number", "default": 3, "description": "画像备份保留数量" },
+          "sceneBackupCount": { "type": "number", "default": 10, "description": "场景块备份保留数量" },
+          "model": { "type": "string", "description": "画像生成模型 (格式: provider/model)，未填写时使用openclaw默认模型" }
+        }
+      },
+      "pipeline": {
+        "type": "object",
+        "description": "L1→L2→L3 管线调度设置",
+        "properties": {
+          "everyNConversations": { "type": "number", "default": 5, "description": "每 N 轮对话触发 L1 批处理" },
+          "enableWarmup": { "type": "boolean", "default": true, "description": "Warm-up 模式：新 session 从 1 轮触发开始，每次 L1 后翻倍（1→2→4→...→everyN），加速早期记忆提取" },
+          "l1IdleTimeoutSeconds": { "type": "number", "default": 600, "description": "L1 空闲超时（秒）：用户停止对话后多久触发 L1 批处理" },
+          "l2DelayAfterL1Seconds": { "type": "number", "default": 10, "description": "L1 完成后延迟多久触发 L2（秒）" },
+          "l2MinIntervalSeconds": { "type": "number", "default": 900, "description": "同一 session 两次 L2 抽取的最小间隔（秒）" },
+          "l2MaxIntervalSeconds": { "type": "number", "default": 3600, "description": "同一活跃 session 的 L2 最大轮询间隔（秒）" },
+          "sessionActiveWindowHours": { "type": "number", "default": 24, "description": "session 活跃窗口（小时），超过此时间不活跃的 session 停止 L2 轮询" }
+        }
+      },
+      "recall": {
+        "type": "object",
+        "description": "记忆召回设置",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true, "description": "是否启用自动召回" },
+          "maxResults": { "type": "number", "default": 5, "description": "召回最大结果数" },
+          "maxCharsPerMemory": { "type": "number", "default": 0, "description": "单条 L1 记忆注入的最大字符数；填 0 表示不限制" },
+          "maxTotalRecallChars": { "type": "number", "default": 0, "description": "本轮 auto-recall 注入的 L1 记忆总字符预算；填 0 表示不限制" },
+          "scoreThreshold": { "type": "number", "default": 0.3, "description": "最低分数阈值" },
+          "strategy": { "type": "string", "enum": ["embedding", "keyword", "hybrid"], "default": "hybrid", "description": "搜索策略：keyword(关键词)、embedding(向量)、hybrid(混合RRF融合，推荐)" },
+          "timeoutMs": { "type": "number", "default": 5000, "description": "召回整体超时（毫秒），超时后跳过记忆注入并打印警告日志" }
+        }
+      },
+      "embedding": {
+        "type": "object",
+        "description": "向量搜索 (Embedding) 配置",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true, "description": "是否启用向量搜索（若 provider=none，则实际会被禁用）" },
+          "provider": { "type": "string", "default": "none", "description": "Embedding 服务提供者：填写兼容 OpenAI API 的远端服务名称（如 openai、deepseek 等）；不填或填 none 则禁用向量搜索" },
+          "proxyUrl": { "type": "string", "description": "本地代理地址（仅 provider=qclaw 时必填）。配置后 embedding 请求将通过该代理转发，原始 baseUrl 作为 Remote-URL 头传递" },
+          "baseUrl": { "type": "string", "description": "API Base URL（必填）：填写对应 provider 的 API 地址" },
+          "apiKey": { "type": "string", "description": "API Key（必填）" },
+          "model": { "type": "string", "description": "模型名称（必填）" },
+          "dimensions": { "type": "number", "description": "向量维度（必填，需与所选模型匹配）" },
+          "sendDimensions": { "type": "boolean", "default": true, "description": "是否在请求体中携带 dimensions 字段。默认 true（兼容 OpenAI text-embedding-3-* 的 Matryoshka 截断）。当目标服务为 BGE-M3 等不支持自定义维度的固定维度模型时，请设为 false，否则会被服务端以 HTTP 400 拒绝（'does not support matryoshka representation'）。" },
+          "conflictRecallTopK": { "type": "number", "default": 5, "description": "冲突检测时召回 Top-K 数" },
+          "maxInputChars": { "type": "number", "default": 5000, "description": "Embedding 输入文本最大字符数，超出时截断并打印警告日志（默认 5000，适合大多数模型的 token 上限）" },
+          "timeoutMs": { "type": "number", "default": 10000, "description": "单次 embedding API 调用超时（毫秒），超时后该次请求中止且不重试" },
+          "recallTimeoutMs": { "type": "number", "description": "recall 路径 embedding 超时（毫秒），覆盖 timeoutMs。用户等待中，建议设短一些（如 3000）" },
+          "captureTimeoutMs": { "type": "number", "description": "capture 路径 embedding 超时（毫秒），覆盖 timeoutMs。后台运行，可设长一些（如 15000）" }
+        }
+      },
+      "tcvdb": {
+        "type": "object",
+        "description": "腾讯云向量数据库配置（仅 storeBackend=tcvdb 时生效）",
+        "properties": {
+          "url": { "type": "string", "description": "实例 URL（必填，如 http://10.0.1.1:8100）" },
+          "username": { "type": "string", "default": "root", "description": "账户名" },
+          "apiKey": { "type": "string", "description": "API Key（必填）" },
+          "database": { "type": "string", "description": "数据库名（未填写时默认根据实例 ID 自动生成）" },
+          "alias": { "type": "string", "description": "用户友好别名（可选，用于 database.json 中识别）" },
+          "embeddingModel": { "type": "string", "default": "bge-large-zh", "description": "服务端 embedding 模型" },
+          "timeout": { "type": "number", "default": 10000, "description": "请求超时（毫秒）" },
+          "caPemPath": { "type": "string", "description": "CA 证书 PEM 文件路径（HTTPS 连接时使用）" }
+        }
+      },
+      "bm25": {
+        "type": "object",
+        "description": "BM25 稀疏向量编码设置（主要用于 tcvdb 后端）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true, "description": "是否启用 BM25 稀疏向量编码" },
+          "language": { "type": "string", "enum": ["zh", "en"], "default": "zh", "description": "分词语言：zh（中文）或 en（英文）" }
+        }
+      },
+      "report": {
+        "type": "object",
+        "description": "指标上报设置",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false, "description": "是否启用指标上报（通过 Gateway 日志输出结构化 METRIC JSON）" },
+          "type": { "type": "string", "default": "local", "description": "上报方式：local 表示通过 logger 输出结构化 JSON 日志" }
+        }
+      },
+      "llm": {
+        "type": "object",
+        "description": "独立 LLM 配置 — 开启后 L1/L2/L3 提取绕过 OpenClaw 的内置模型，改用指定的 OpenAI-compatible API 直接调用。默认关闭（使用 OpenClaw 宿主模型）。",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false, "description": "是否启用独立 LLM 模式。关闭时使用 OpenClaw 宿主模型。" },
+          "baseUrl": { "type": "string", "default": "https://api.openai.com/v1", "description": "OpenAI-compatible API 地址" },
+          "apiKey": { "type": "string", "description": "API Key" },
+          "model": { "type": "string", "default": "gpt-4o", "description": "模型名称（如 gpt-4o, deepseek-v3, claude-sonnet-4-6）" },
+          "maxTokens": { "type": "number", "default": 4096, "description": "最大输出 token 数" },
+          "timeoutMs": { "type": "number", "default": 120000, "description": "请求超时（毫秒）" }
+        }
+      },
+      "offload": {
+        "type": "object",
+        "description": "Context Offload 设置 — 多层上下文压缩系统（独立开关，默认关闭）",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false, "description": "是否启用 Context Offload（默认关闭，不影响 Memory 功能）" },
+          "model": { "type": "string", "description": "Offload 使用的 LLM 模型（格式: provider/model），未填写时使用 openclaw 默认模型" },
+          "temperature": { "type": "number", "default": 0.2, "description": "LLM 温度参数" },
+          "forceTriggerThreshold": { "type": "number", "default": 4, "description": "累积多少个 tool pair 后强制触发 L1" },
+          "dataDir": { "type": "string", "description": "自定义数据目录（绝对路径），默认 ~/.openclaw/context-offload" },
+          "defaultContextWindow": { "type": "number", "default": 200000, "description": "默认上下文窗口大小" },
+          "maxPairsPerBatch": { "type": "number", "default": 20, "description": "L1 每批最大 tool pair 数" },
+          "l2NullThreshold": { "type": "number", "default": 4, "description": "offload.jsonl 中 node_id=null 数量达到此阈值时触发 L2" },
+          "l2TimeoutSeconds": { "type": "number", "default": 300, "description": "距上次 L2 超过此秒数时触发 L2" },
+          "mildOffloadRatio": { "type": "number", "default": 0.5, "description": "温和压缩触发比例（占 context window）" },
+          "aggressiveCompressRatio": { "type": "number", "default": 0.85, "description": "激进压缩触发比例" },
+          "mmdMaxTokenRatio": { "type": "number", "default": 0.2, "description": "MMD 注入 token 预算比例" },
+          "backendUrl": { "type": "string", "description": "后端服务 URL（如 https://offload-api.example.com），配置后 L1/L1.5/L2/L4 走后端" },
+          "backendApiKey": { "type": "string", "description": "后端 API 认证 token" },
+          "backendTimeoutMs": { "type": "number", "default": 10000, "description": "后端调用超时（毫秒）" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "id": "memory-tencentdb-client",
+  "name": "Memory TencentDB (Client)",
+  "version": "0.1.0",
+  "description": "长期记忆插件（客户端接入版）— 通过远端 memory server 提供四层记忆能力",
+  "author": "TDAI Team",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "tdai_memory_search",
+      "tdai_conversation_search",
+      "tdai_read_cos"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "server": {
+        "type": "object",
+        "description": "远端 memory server 连接配置",
+        "properties": {
+          "url": {
+            "type": "string",
+            "default": "http://127.0.0.1:8420",
+            "description": "Memory server URL"
+          },
+          "apiKey": {
+            "type": "string",
+            "default": "sk-xxxx",
+            "description": "API Key for server authentication"
+          },
+          "instanceId": {
+            "type": "string",
+            "default": "default",
+            "description": "Memory instance id（HTTP header x-tdai-service-id）"
+          }
+        }
+      },
+      "recall": {
+        "type": "object",
+        "description": "记忆召回设置",
+        "properties": {
+          "maxResults": {
+            "type": "number",
+            "default": 5,
+            "description": "每轮最多注入多少条 L1 记忆"
+          },
+          "includePersona": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否注入 L3 画像"
+          },
+          "includeSceneNav": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否注入 L2 场景导航索引"
+          }
+        }
+      },
+      "capture": {
+        "type": "object",
+        "description": "对话捕获设置",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否启用自动对话捕获 (L0)"
+          }
+        }
+      }
+    }
+  }
+}

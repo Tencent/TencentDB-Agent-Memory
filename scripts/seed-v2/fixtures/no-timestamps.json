@@ -1,0 +1,17 @@
+{
+  "sessions": [
+    {
+      "sessionKey": "no-ts-alice",
+      "conversations": [
+        [
+          { "role": "user",      "content": "我叫 Alice，最近在学 Python 数据分析。" },
+          { "role": "assistant", "content": "Python 数据分析通常涉及 pandas、numpy 这些库。你目前学到哪一步？" }
+        ],
+        [
+          { "role": "user",      "content": "我刚学完 pandas 基础，现在在做股票数据的处理。" },
+          { "role": "assistant", "content": "股票数据典型的就是时间序列分析，建议熟悉一下 datetime 索引。" }
+        ]
+      ]
+    }
+  ]
+}

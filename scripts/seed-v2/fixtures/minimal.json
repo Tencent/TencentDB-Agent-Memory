@@ -1,0 +1,64 @@
+{
+  "sessions": [
+    {
+      "sessionKey": "seed-alice",
+      "sessionId": "seed-alice",
+      "conversations": [
+        [
+          { "role": "user",      "content": "我叫 Alice，最近在学 Rust 语言，主要在做嵌入式开发。" },
+          { "role": "assistant", "content": "了解，Rust 在嵌入式领域优势明显。你目前用的是哪块板子？" }
+        ],
+        [
+          { "role": "user",      "content": "我用的是 STM32H7 系列。我特别喜欢 Rust 的 ownership 模型，感觉对资源管理很有帮助。" },
+          { "role": "assistant", "content": "STM32H7 性能不错。Rust 的所有权模型确实能在编译期就排除很多资源泄漏问题。" }
+        ],
+        [
+          { "role": "user",      "content": "我打算做一个低功耗的传感器节点，用 LoRa 通信。" },
+          { "role": "assistant", "content": "LoRa 适合低功耗场景。你考虑用 RTIC 还是 embassy 这种异步框架吗？" }
+        ],
+        [
+          { "role": "user",      "content": "我倾向于 embassy，async/await 写起来更顺。" },
+          { "role": "assistant", "content": "embassy 在嵌入式 async 场景里生态成熟，executor 也很轻量。" }
+        ],
+        [
+          { "role": "user",      "content": "我每天大概能写 4 小时代码，主要在晚上 8 点到 12 点。" },
+          { "role": "assistant", "content": "晚上是连续编码的好时段。建议早上 review 一下前一天的代码再开始新模块。" }
+        ],
+        [
+          { "role": "user",      "content": "对了，我之前用的语言是 C 和 Python，从 C 转 Rust 一开始很难适应借用检查器。" },
+          { "role": "assistant", "content": "从 C 转 Rust 确实需要思维转换，多用 cargo clippy 帮你养成习惯。" }
+        ]
+      ]
+    },
+    {
+      "sessionKey": "seed-bob",
+      "sessionId": "seed-bob",
+      "conversations": [
+        [
+          { "role": "user",      "content": "Hi，我是 Bob，做数据分析的，平时主要用 Python 和 SQL。" },
+          { "role": "assistant", "content": "Python + SQL 是数据分析的黄金组合。你做哪类业务的数据？" }
+        ],
+        [
+          { "role": "user",      "content": "电商，主要看用户行为漏斗和复购率。最近在搞 RFM 模型。" },
+          { "role": "assistant", "content": "RFM 是经典模型。你打算用它做用户分群再做精准营销吗？" }
+        ],
+        [
+          { "role": "user",      "content": "对，分群之后想接 A/B 测试，看不同分群对优惠券敏感度。" },
+          { "role": "assistant", "content": "好思路。建议把 RFM 评分时间窗对齐 A/B 实验周期，避免季节性偏差。" }
+        ],
+        [
+          { "role": "user",      "content": "我团队有 3 个人，一个 BI、一个数据科学家，加我自己。" },
+          { "role": "assistant", "content": "团队结构合理。BI 负责报表，数据科学家做模型，你协调和落地。" }
+        ],
+        [
+          { "role": "user",      "content": "我们用 ClickHouse 存日志，每天大概 5 亿条记录。" },
+          { "role": "assistant", "content": "ClickHouse 处理这种规模没压力。注意 partition 设计和 MergeTree 引擎选型。" }
+        ],
+        [
+          { "role": "user",      "content": "对了，我下个月要去新加坡出差一周参加 data conf。" },
+          { "role": "assistant", "content": "祝出差顺利！data conf 是个不错的拓展视野的场合。" }
+        ]
+      ]
+    }
+  ]
+}

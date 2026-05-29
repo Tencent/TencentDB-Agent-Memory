@@ -1,0 +1,13 @@
+{
+  "sessions": [
+    {
+      "sessionKey": "mixed-bob",
+      "conversations": [
+        [
+          { "role": "user",      "content": "测试 mixed timestamp 是否被检测", "timestamp": 1700000000000 },
+          { "role": "assistant", "content": "这一条故意没有 timestamp" }
+        ]
+      ]
+    }
+  ]
+}

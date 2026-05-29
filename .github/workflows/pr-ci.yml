@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel previous runs for the same PR / branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Install dependencies ────────────────────────────────
+  install:
+    name: Install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-deps
+        with:
+          path: node_modules
+          key: deps-${{ runner.os }}-${{ hashFiles('package.json') }}
+
+      - name: npm install
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm install --ignore-scripts
+
+  # ── 2. Pack validation ─────────────────────────────────────
+  pack:
+    name: Pack
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Restore node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: deps-${{ runner.os }}-${{ hashFiles('package.json') }}
+
+      - name: npm pack (dry-run)
+        run: npm pack --dry-run
+
+      - name: npm pack
+        run: npm pack
+
+      - name: Upload .tgz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-tarball
+          path: "*.tgz"
+          retention-days: 7
+
+  # ── 5. Plugin manifest validation ──────────────────────────
+  manifest:
+    name: Manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate openclaw.plugin.json
+        run: |
+          echo "── Checking openclaw.plugin.json exists ──"
+          test -f openclaw.plugin.json || { echo "❌ openclaw.plugin.json not found"; exit 1; }
+
+          echo "── Checking valid JSON ──"
+          node -e "JSON.parse(require('fs').readFileSync('openclaw.plugin.json','utf8'))" || { echo "❌ Invalid JSON"; exit 1; }
+
+          echo "── Checking required fields ──"
+          node -e "
+            const m = JSON.parse(require('fs').readFileSync('openclaw.plugin.json','utf8'));
+            const errors = [];
+            if (!m.id || typeof m.id !== 'string') errors.push('missing or invalid \"id\"');
+            if (m.configSchema && typeof m.configSchema !== 'object') errors.push('\"configSchema\" must be an object');
+            if (errors.length) { console.error('❌ Manifest errors:', errors.join(', ')); process.exit(1); }
+            console.log('✅ id:', m.id);
+            if (m.name) console.log('   name:', m.name);
+            if (m.configSchema) console.log('   configSchema: present (' + Object.keys(m.configSchema.properties || {}).length + ' top-level props)');
+          "
+
+          echo "── Checking package.json openclaw metadata ──"
+          node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('package.json','utf8'));
+            const oc = pkg.openclaw || {};
+            const errors = [];
+            if (!oc.extensions || !oc.extensions.length) errors.push('missing openclaw.extensions');
+            if (!oc.compat?.pluginApi) errors.push('missing openclaw.compat.pluginApi');
+            if (!oc.build?.openclawVersion) errors.push('missing openclaw.build.openclawVersion');
+            if (errors.length) { console.error('❌ Package metadata errors:', errors.join(', ')); process.exit(1); }
+            console.log('✅ openclaw metadata OK');
+            console.log('   pluginApi:', oc.compat.pluginApi);
+            console.log('   openclawVersion:', oc.build.openclawVersion);
+          "
+
+  # ── 6. Package size guard ──────────────────────────────────
+  size:
+    name: Size Guard
+    needs: pack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: package-tarball
+
+      - name: Check package size
+        run: |
+          TGZ=$(ls *.tgz | head -1)
+          SIZE=$(stat -c%s "$TGZ" 2>/dev/null || stat -f%z "$TGZ")
+          SIZE_KB=$((SIZE / 1024))
+          MAX_KB=2048
+
+          echo "📦 Package: $TGZ"
+          echo "   Size: ${SIZE_KB} KB (limit: ${MAX_KB} KB)"
+
+          if [ "$SIZE_KB" -gt "$MAX_KB" ]; then
+            echo "❌ Package exceeds ${MAX_KB} KB size limit!"
+            echo "   Consider checking if large files were accidentally included."
+            exit 1
+          else
+            echo "✅ Size OK"
+          fi
