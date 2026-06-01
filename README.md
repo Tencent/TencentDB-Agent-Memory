@@ -176,7 +176,7 @@ Add the `slots` field so OpenClaw routes context-offload requests to this plugin
 {
   "plugins": {
     "slots": {
-      "contextEngine": "openclaw-context-offload"
+      "contextEngine": "memory-tencentdb"
     }
   }
 }
