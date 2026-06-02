@@ -176,6 +176,7 @@ SKIPPED=0
 FAILED=0
 
 # ─── 对每个候选文件尝试多种策略 ──────────────────────────────────
+if [[ ${#CANDIDATE_FILES[@]} -gt 0 ]]; then
 for f in "${CANDIDATE_FILES[@]}"; do
     fname="$(basename "$f")"
     relpath="${f#$DIST_DIR/}"
@@ -300,6 +301,7 @@ for f in "${CANDIDATE_FILES[@]}"; do
         fi
     fi
 done
+fi
 
 # ─── 结果报告 ────────────────────────────────────────────────────
 echo ""
