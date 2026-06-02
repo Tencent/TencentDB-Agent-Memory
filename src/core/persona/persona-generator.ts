@@ -29,6 +29,8 @@ export class PersonaGenerator {
     config: unknown;
     model?: string;
     backupCount?: number;
+    /** Global lane name for the embedded agent run. */
+    lane?: string;
     logger?: Logger;
     /** Plugin instance ID for metric reporting (optional) */
     instanceId?: string;
@@ -47,6 +49,7 @@ export class PersonaGenerator {
     this.runner = opts.llmRunner ?? new CleanContextRunner({
       config: opts.config,
       modelRef: opts.model,
+      lane: opts.lane,
       enableTools: true,
       logger: opts.logger,
     });

@@ -317,6 +317,10 @@ If `MEMORY_TENCENTDB_GATEWAY_API_KEY` is unset, the plugin also looks at `TDAI_G
 | `pipeline.l2MinIntervalSeconds` | `900` | Minimum interval between two L2 passes within the same session |
 | `recall.timeoutMs` | `5000` | Recall timeout; on timeout, skip injection without blocking the conversation |
 | `extraction.enableDedup` | `true` | L1 vector dedup / conflict detection |
+| `extraction.model` | *(default model)* | LLM model for L1 extraction (format: `provider/model`) |
+| `extraction.lane` | *(main lane)* | Global lane for extraction runs (e.g. `"cron"` to use `"cron-nested"` lane) |
+| `persona.model` | *(default model)* | LLM model for L2 scene extraction & L3 persona generation |
+| `persona.lane` | *(main lane)* | Global lane for persona/scene runs |
 | `capture.excludeAgents` | `[]` | Glob patterns to exclude specific agents (e.g. `bench-judge-*`) |
 | `capture.l0l1RetentionDays` | `0` | Local retention days for L0 / L1 files; `0` = never clean up |
 | `offload.mildOffloadRatio` | `0.5` | Mild compression trigger ratio (of context window) |

@@ -281,6 +281,18 @@ export interface CleanContextRunnerOptions {
   agentRuntime?: EmbeddedAgentRuntimeLike;
   /** Allow the LLM to use tools (read_file, write_to_file, etc). Default: false */
   enableTools?: boolean;
+  /**
+   * Global lane name for the embedded agent run.
+   *
+   * OpenClaw routes embedded runs through a session lane (one-at-a-time per session)
+   * and a global lane (shared parallelism pool). By default the global lane is `"main"`,
+   * which is also used by the primary chat agent. Setting this to `"cron"` (→ `"cron-nested"`)
+   * or another named lane prevents long-running extraction calls from competing with
+   * interactive chat turns.
+   *
+   * @default undefined → OpenClaw defaults to `"main"`
+   */
+  lane?: string;
   /** Logger instance for detailed tracing */
   logger?: RunnerLogger;
 }
@@ -455,6 +467,9 @@ export class CleanContextRunner {
         // providers (qwencode) reject with "[] is too short - 'tools'".
         // Instead rely on cleanConfig.tools.allow to restrict the tool set
         // to a minimal read-only tool (when enableTools=false).
+        // Pass lane to use a dedicated global lane (e.g. "cron" → "cron-nested")
+        // instead of the default "main" lane shared with interactive sessions.
+        lane: this.options.lane,
         disableTools: false,
         extraSystemPrompt: effectiveSystemPrompt,
         streamParams: {

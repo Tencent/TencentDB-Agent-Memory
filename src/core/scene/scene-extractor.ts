@@ -51,6 +51,11 @@ export interface SceneExtractorOptions {
   /** Plugin instance ID for metric reporting (optional) */
   instanceId?: string;
   /**
+   * Global lane name for the embedded agent run.
+   * @default undefined → OpenClaw defaults to "main"
+   */
+  lane?: string;
+  /**
    * Host-neutral LLM runner. When provided, used instead of creating
    * a CleanContextRunner (decouples from OpenClaw runtime).
    * Must be configured with `enableTools: true`.
@@ -102,6 +107,7 @@ export class SceneExtractor {
     this.runner = opts.llmRunner ?? new CleanContextRunner({
       config: opts.config,
       modelRef: opts.model,
+      lane: opts.lane,
       enableTools: true,
       logger: opts.logger,
     });

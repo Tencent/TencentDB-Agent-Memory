@@ -91,6 +91,8 @@ export async function extractL1Memories(params: {
     model?: string;
     /** Previous scene name for continuity */
     previousSceneName?: string;
+    /** Global lane name for the embedded agent run. */
+    lane?: string;
     /** Vector store for cosine similarity candidate recall */
     vectorStore?: IMemoryStore;
     /** Embedding service for computing query vectors */
@@ -158,6 +160,7 @@ export async function extractL1Memories(params: {
       config,
       logger,
       model: options.model,
+      lane: options.lane,
       llmRunner: options.llmRunner,
     });
     logger?.debug?.(`${TAG} LLM detected ${scenes.length} scene(s)`);
@@ -300,6 +303,8 @@ async function callLlmExtraction(params: {
   config: unknown;
   logger?: Logger;
   model?: string;
+  /** Global lane name for the embedded agent run. */
+  lane?: string;
   /** Host-neutral LLM runner — when provided, used instead of CleanContextRunner. */
   llmRunner?: LLMRunner;
 }): Promise<SceneSegment[]> {
@@ -331,6 +336,7 @@ async function callLlmExtraction(params: {
     const runner = new CleanContextRunner({
       config,
       modelRef: model,
+      lane: params.lane,
       enableTools: false,
       logger,
     });
