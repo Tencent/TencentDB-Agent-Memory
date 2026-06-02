@@ -7,6 +7,7 @@
  */
 
 import type { ConversationMessage } from "../conversation/l0-recorder.js";
+import { formatForLLM, describeTimeZoneForPrompt } from "../../utils/time.js";
 
 // ============================
 // System Prompt
@@ -120,15 +121,17 @@ export function formatExtractionPrompt(params: {
 
   const bgText = backgroundMessages.length > 0
     ? backgroundMessages
-        .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+        .map((m) => `[${m.id}] [${m.role}] [${formatForLLM(m.timestamp)}]: ${m.content}`)
         .join("\n\n")
     : "无";
 
   const newText = newMessages
-    .map((m) => `[${m.id}] [${m.role}] [${new Date(m.timestamp).toISOString()}]: ${m.content}`)
+    .map((m) => `[${m.id}] [${m.role}] [${formatForLLM(m.timestamp)}]: ${m.content}`)
     .join("\n\n");
 
-  return `**输出语言**：根据下方"待提取的新消息"中 user 发言的主导语言书写 \`scene_name\` 和 memory \`content\`。
+  return `**${describeTimeZoneForPrompt()}**
+
+**输出语言**：根据下方"待提取的新消息"中 user 发言的主导语言书写 \`scene_name\` 和 memory \`content\`。
 
 【上一个情境】：${previousSceneName}
 

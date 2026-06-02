@@ -12,6 +12,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { formatForLLM } from "../../utils/time.js";
 import type { MemoryTdaiConfig } from "../../config.js";
 import { readSceneIndex } from "../scene/scene-index.js";
 import { generateSceneNavigation, stripSceneNavigation } from "../scene/scene-navigation.js";
@@ -784,22 +785,27 @@ function truncateRecallLine(line: string, maxChars: number): string {
 }
 
 /**
- * Format an ISO 8601 timestamp to a concise date or datetime string.
+ * Format an ISO 8601 timestamp to a concise, timezone-aware string for display.
+ * Uses the configured timezone (via time module).
  * - If the time part is 00:00:00 → show date only (e.g. "2025-03-01")
- * - Otherwise → show date + time (e.g. "2025-03-01 14:30")
+ * - Otherwise → show full ISO 8601 with offset (e.g. "2025-03-01T14:30:00+08:00")
  * - Returns undefined for empty/invalid inputs.
  */
 function formatTimestamp(ts: string | undefined): string | undefined {
   if (!ts) return undefined;
-  // Try to parse ISO format: "2025-03-01T14:30:00.000Z" or "2025-03-01"
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return undefined;
+
+  // Check if time part is midnight UTC (date-only semantics)
   const match = ts.match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2})(?::\d{2})?)?/);
-  if (!match) return undefined;
-  const datePart = match[1];
-  const timePart = match[2];
-  if (!timePart || timePart === "00:00") {
-    return datePart;
+  if (match) {
+    const timePart = match[2];
+    if (!timePart || timePart === "00:00") {
+      return match[1]; // date-only, no timezone conversion needed
+    }
   }
-  return `${datePart} ${timePart}`;
+
+  return formatForLLM(ts);
 }
 
 /**

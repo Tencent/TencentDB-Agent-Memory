@@ -295,6 +295,7 @@ If `MEMORY_TENCENTDB_GATEWAY_API_KEY` is unset, the plugin also looks at `TDAI_G
 
 | Field | Default | Description |
 | :--- | :--- | :--- |
+| `timezone` | `"system"` | Timezone for user/LLM-facing timestamps: `"system"` (follow process tz) / IANA name (`Asia/Shanghai`) / offset string (`+08:00`) |
 | `storeBackend` | `"sqlite"` | Storage backend: `sqlite` |
 | `recall.strategy` | `"hybrid"` | Recall strategy: `keyword` / `embedding` / `hybrid` (RRF fusion, recommended) |
 | `recall.maxResults` | `5` | Number of items returned per recall |

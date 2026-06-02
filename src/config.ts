@@ -269,6 +269,15 @@ export interface OffloadConfig {
 
 /** Fully resolved plugin configuration (v3). */
 export interface MemoryTdaiConfig {
+  /**
+   * Timezone for user/LLM-facing timestamps and local-day boundaries.
+   * - "system" (default): follow process system timezone
+   * - IANA name: "Asia/Shanghai", "Europe/Berlin", "UTC"
+   * - UTC offset string: "+08:00", "-05:30" (ECMA-402 2024)
+   *
+   * Storage instants (SQLite/TCVDB) are always UTC regardless of this setting.
+   */
+  timezone: string;
   capture: CaptureConfig;
   extraction: ExtractionConfig;
   persona: PersonaConfig;
@@ -468,6 +477,7 @@ export function parseConfig(raw: Record<string, unknown> | undefined): MemoryTda
   };
 
   return {
+    timezone: str(c, "timezone") ?? "system",
     capture: {
       enabled: bool(captureGroup, "enabled") ?? true,
       excludeAgents: strArray(captureGroup, "excludeAgents") ?? [],

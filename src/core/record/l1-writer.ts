@@ -22,6 +22,7 @@ import crypto from "node:crypto";
 import type { IMemoryStore } from "../store/types.js";
 import type { EmbeddingService } from "../store/embedding.js";
 import type { Logger } from "../types.js";
+import { formatLocalDate } from "../../utils/time.js";
 
 // ============================
 // Types
@@ -265,10 +266,3 @@ export async function writeMemory(params: {
 // ============================
 // Helpers
 // ============================
-
-function formatLocalDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}

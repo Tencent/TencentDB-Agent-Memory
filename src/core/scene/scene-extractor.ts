@@ -18,6 +18,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { formatForLLM } from "../../utils/time.js";
 import { CleanContextRunner } from "../../utils/clean-context-runner.js";
 import { CheckpointManager } from "../../utils/checkpoint.js";
 import { BackupManager } from "../../utils/backup.js";
@@ -179,7 +180,7 @@ export class SceneExtractor {
     const memoriesJson = JSON.stringify(
       memories.map((m) => ({
         content: m.content,
-        created_at: m.created_at,
+        created_at: m.created_at ? formatForLLM(m.created_at) : m.created_at,
         id: m.id ?? "",
       })),
       null,
@@ -475,5 +476,5 @@ export class SceneExtractor {
 }
 
 function formatTimestamp(d: Date): string {
-  return d.toISOString();
+  return formatForLLM(d);
 }

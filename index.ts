@@ -23,6 +23,7 @@ import { createRequire } from "node:module";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { parseConfig } from "./src/config.js";
 import type { MemoryTdaiConfig } from "./src/config.js";
+import { initTimeModule, getActiveTimeZone } from "./src/utils/time.js";
 import { registerOffload } from "./src/offload/index.js";
 import {
   setPreferredEmbeddedAgentRuntime,
@@ -189,6 +190,9 @@ export default function register(api: OpenClawPluginApi) {
     api.logger.error(`${TAG} Config parsing failed: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
+
+  // Initialize unified time module (must happen before any timestamp formatting)
+  initTimeModule({ timezone: cfg.timezone }, api.logger);
 
   // ============================
   // Hook policy auto-patch (v2026.4.24+ compat)

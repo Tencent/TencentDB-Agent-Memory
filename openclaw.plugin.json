@@ -13,6 +13,11 @@
     "type": "object",
     "additionalProperties": true,
     "properties": {
+      "timezone": {
+        "type": "string",
+        "default": "system",
+        "description": "时区配置：影响所有暴露给用户/LLM 的时间戳和本地日切片。可选值：\"system\"（跟随进程系统时区）、IANA 时区名（如 \"Asia/Shanghai\"、\"Europe/Berlin\"）、UTC 偏移串（如 \"+08:00\"、\"-05:30\"）。存储时间戳始终为 UTC，此配置仅影响展示层。"
+      },
       "storeBackend": {
         "type": "string",
         "enum": ["sqlite", "tcvdb"],

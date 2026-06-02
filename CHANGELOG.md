@@ -4,6 +4,29 @@
 
 ---
 
+## [Unreleased]
+
+### ✨ 新功能
+
+- **时区可配置** ([#75](https://github.com/Tencent/TencentDB-Agent-Memory/issues/75) / [#87](https://github.com/Tencent/TencentDB-Agent-Memory/issues/87))：新增顶层 `timezone` 配置项，支持 IANA 时区名（`Asia/Shanghai`、`Europe/Berlin`）和 UTC 偏移串（`+08:00`、`-05:30`）。默认 `"system"`（跟随进程系统时区），升级零感。
+  - **暴露给 LLM 的时间戳**统一为带显式 offset 的 ISO 8601（如 `2026-04-07T11:04:45+08:00`），修复 #87 报告的 UTC/本地时区混用导致 LLM 误算时间差的问题。
+  - **L1 / L2 prompt 顶部**自动插入时区声明，指引 LLM 按正确时区推算"昨天"、"上周"等相对时间。
+  - **L0 JSONL 分片日**和 **cleaner 清理边界**跟随配置时区（默认仍为系统时区）。
+  - 存储层（SQLite / TCVDB）时间戳始终为 UTC instant，**无需数据迁移**。
+  - 统一收敛原有 4 处分散的时间格式化 helper 到 `src/utils/time.ts`，减少代码重复。
+
+### ⚠️ 升级注意（仅在显式配置 `timezone` 时生效）
+
+如果你**显式**设置了 IANA 时区（如 `"Asia/Shanghai"`）：
+
+1. **L0 JSONL 分片日**：将以配置时区的午夜为界。如果你的服务器系统时区与配置时区不同，升级当天的分片文件名可能与之前一天有重叠——不会丢数据（cursor 按 instant 比较）。如有外部工具按文件名做去重/归档，请确认其能正确处理同一日期出现两次的情况。
+2. **cleaner `cleanTime` 触发时机**：从"系统时区的指定时刻"改为"配置时区的指定时刻"。
+3. **scene/persona META 头部时间戳格式**：新写入将使用 `YYYY-MM-DDTHH:mm:ss±HH:MM` 完整 ISO 8601。老数据保持原样，召回展示时由系统统一换算。
+
+不动配置 = 行为完全不变。
+
+---
+
 ## [0.3.6] - 2026-05-27
 
 ### ✨ 新功能

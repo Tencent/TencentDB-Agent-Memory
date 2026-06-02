@@ -299,6 +299,7 @@ export MEMORY_TENCENTDB_GATEWAY_API_KEY="<与 Gateway 同一份密钥>"
 
 | 字段 | 默认 | 说明 |
 | :--- | :--- | :--- |
+| `timezone` | `"system"` | 时区：`"system"`（跟随系统）/ IANA 名（`Asia/Shanghai`）/ offset 串（`+08:00`） |
 | `storeBackend` | `"sqlite"` | 存储后端：`sqlite` |
 | `recall.strategy` | `"hybrid"` | 召回策略：`keyword` / `embedding` / `hybrid`（RRF 融合，推荐） |
 | `recall.maxResults` | `5` | 每次召回条数 |

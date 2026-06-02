@@ -19,6 +19,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { sanitizeText, stripCodeBlocks, shouldCaptureL0 } from "../../utils/sanitize.js";
 import type { Logger } from "../types.js";
+import { formatLocalDate } from "../../utils/time.js";
 
 // ============================
 // Types
@@ -565,12 +566,4 @@ function extractUserAssistantMessages(messages: unknown[]): ConversationMessage[
   return result;
 }
 
-/**
- * Format local date as YYYY-MM-DD.
- */
-function formatLocalDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+

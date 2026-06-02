@@ -5,6 +5,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { formatForLLM } from "../../utils/time.js";
 import { CleanContextRunner } from "../../utils/clean-context-runner.js";
 import { CheckpointManager } from "../../utils/checkpoint.js";
 import { readSceneIndex } from "../scene/scene-index.js";
@@ -127,7 +128,7 @@ export class PersonaGenerator {
     // 6. Build prompt
     const { systemPrompt, userPrompt } = buildPersonaPrompt({
       mode,
-      currentTime: new Date().toISOString(),
+      currentTime: formatForLLM(new Date()),
       totalProcessed: cp.total_processed,
       sceneCount: index.length,
       changedSceneCount: changedScenes.length,
