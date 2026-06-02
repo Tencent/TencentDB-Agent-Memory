@@ -120,7 +120,7 @@ fi
 info "OpenClaw 目录: $OPENCLAW_DIR"
 
 # ─── 检测 OpenClaw 版本 ──────────────────────────────────────────
-VERSION=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$OPENCLAW_DIR/package.json" 2>/dev/null || echo "unknown")
+VERSION=$(node -e "const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log(pkg.version || 'unknown');" "$OPENCLAW_DIR/package.json" 2>/dev/null || echo "unknown")
 info "检测到 OpenClaw 版本: $VERSION"
 
 # ─── 已 patch 检测 ───────────────────────────────────────────────
@@ -160,7 +160,10 @@ backup_file() {
 
 # ─── 查找所有候选文件 ────────────────────────────────────────────
 # 收集所有包含 after_tool_call 的 JS 文件（不限子目录深度）
-mapfile -t CANDIDATE_FILES < <(grep -rl 'after_tool_call' "$DIST_DIR" --include='*.js' 2>/dev/null || true)
+CANDIDATE_FILES=()
+while IFS= read -r candidate_file; do
+    CANDIDATE_FILES+=("$candidate_file")
+done < <(grep -rl 'after_tool_call' "$DIST_DIR" --include='*.js' 2>/dev/null || true)
 
 if [[ ${#CANDIDATE_FILES[@]} -eq 0 ]]; then
     warn "在 $DIST_DIR 下未找到包含 after_tool_call 的 JS 文件"
@@ -187,17 +190,19 @@ for f in "${CANDIDATE_FILES[@]}"; do
     # 确认文件中有 durationMs（hookEvent 的标志字段）
     if ! grep -q 'durationMs' "$f" 2>/dev/null; then
         debug "$relpath — 不含 durationMs，非 patch 目标，跳过"
+        ((SKIPPED++)) || true
         continue
     fi
 
     # 确认 durationMs 附近有 after_tool_call 上下文（避免误匹配 before_compaction 等）
     if ! perl -0777 -ne 'exit(0) if /after_tool_call[\s\S]{0,2000}durationMs/; exit(1)' "$f" 2>/dev/null; then
         debug "$relpath — durationMs 不在 after_tool_call 上下文中，跳过"
+        ((SKIPPED++)) || true
         continue
     fi
 
-    backup_file "$f"
     applied=false
+    edit_attempted=false
 
     # ── 策略 1: hookEvent 对象中 durationMs 是最后一个字段 ────────
     # 匹配: durationMs<换行><空白>};<换行><空白>hookRunnerAfter
@@ -206,6 +211,8 @@ for f in "${CANDIDATE_FILES[@]}"; do
     if [[ "$applied" == "false" ]]; then
         if perl -0777 -ne 'exit(0) if /durationMs\s*\n(\s*)\};\s*\n\s*(hookRunnerAfter|await\s+\S*hookRunner\S*\.runAfterToolCall|hookRunner\S*\.runAfterToolCall)/; exit(1)' "$f" 2>/dev/null; then
             debug "$relpath — 命中策略1 (hookRunnerAfter 锚点)"
+            backup_file "$f"
+            edit_attempted=true
             perl -0777 -i -pe 's/(durationMs)\s*\n(\s*\};\s*\n\s*(?:hookRunnerAfter|await\s+\S*hookRunner\S*\.runAfterToolCall|hookRunner\S*\.runAfterToolCall))/$1,\n\t\t\tmessages: ctx.params.session?.messages\n$2/' "$f"
             if verify_patch "$f"; then
                 ok "[策略1] $relpath — patch 成功"
@@ -217,11 +224,13 @@ for f in "${CANDIDATE_FILES[@]}"; do
 
     # ── 策略 2: 旧版 dispatch-*.js — durationMs 行末独占 ─────────
     if [[ "$applied" == "false" ]]; then
-        if echo "$relpath" | grep -qP 'dispatch-.*\.js' 2>/dev/null; then
+        if echo "$relpath" | grep -Eq 'dispatch-.*\.js' 2>/dev/null; then
             # 匹配行末独占的 durationMs（前面是空白）
-            if grep -qP '^\s+durationMs\s*$' "$f" 2>/dev/null; then
+            if grep -Eq '^[[:space:]]+durationMs[[:space:]]*$' "$f" 2>/dev/null; then
                 debug "$relpath — 命中策略2 (旧版 dispatch)"
-                sed -i -E 's/^(\s+)(durationMs)\s*$/\1\2,\n\1messages: ctx.params.session?.messages/' "$f"
+                backup_file "$f"
+                edit_attempted=true
+                perl -i -pe 's/^([ \t]+)(durationMs)[ \t]*$/$1$2,\n$1messages: ctx.params.session?.messages/' "$f"
                 if verify_patch "$f"; then
                     ok "[策略2] $relpath — patch 成功"
                     ((PATCHED++)) || true
@@ -239,6 +248,8 @@ for f in "${CANDIDATE_FILES[@]}"; do
         if perl -0777 -ne 'exit(0) if /after_tool_call[\s\S]{0,800}durationMs\s*\n(\s*)\};/; exit(1)' "$f" 2>/dev/null; then
             debug "$relpath — 命中策略3 (durationMs→}; 邻近 after_tool_call)"
             # 只替换 after_tool_call 上下文附近的 durationMs → };
+            backup_file "$f"
+            edit_attempted=true
             perl -0777 -i -pe 's/(after_tool_call[\s\S]{0,800}durationMs)\s*\n(\s*\};)/$1,\n\t\t\tmessages: ctx.params.session?.messages\n$2/' "$f"
             if verify_patch "$f"; then
                 ok "[策略3] $relpath — patch 成功"
@@ -258,6 +269,8 @@ for f in "${CANDIDATE_FILES[@]}"; do
         if perl -0777 -ne 'exit(0) if /after_tool_call[\s\S]{0,2000}?(?:hookEvent|hook_event)[\s\S]{0,500}?durationMs/; exit(1)' "$f" 2>/dev/null; then
             debug "$relpath — 命中策略4 (通用 fallback)"
             # 在 durationMs 后追加 (仅首次匹配)
+            backup_file "$f"
+            edit_attempted=true
             perl -0777 -i -pe '
                 my $done = 0;
                 s/(after_tool_call[\s\S]{0,2000}?(?:hookEvent|hook_event)[\s\S]{0,500}?durationMs)\s*\n(\s*)(\};)/
@@ -278,8 +291,13 @@ for f in "${CANDIDATE_FILES[@]}"; do
 
     # ── 无策略命中 ───────────────────────────────────────────────
     if [[ "$applied" == "false" ]]; then
-        debug "$relpath — 无策略命中"
-        ((FAILED++)) || true
+        if [[ "$edit_attempted" == "true" ]]; then
+            debug "$relpath — patch 后验证失败"
+            ((FAILED++)) || true
+        else
+            debug "$relpath — 无策略命中，非 patch 目标，跳过"
+            ((SKIPPED++)) || true
+        fi
     fi
 done
 
@@ -295,7 +313,7 @@ if [[ $PATCHED -gt 0 ]]; then
     echo -e "  ${CYAN}重启 OpenClaw 后生效。${NC}"
     echo -e "  ${CYAN}备份文件: *.pre-offload-patch.bak${NC}"
 elif [[ $SKIPPED -gt 0 && $FAILED -eq 0 ]]; then
-    echo -e "  ${YELLOW}所有目标文件已 patch，无需重复操作。${NC}"
+    echo -e "  ${YELLOW}未发现需要修改的目标文件；已 patch 或非目标候选已跳过。${NC}"
 elif [[ $FAILED -gt 0 ]]; then
     echo -e "  ${RED}部分文件未能 patch。可能需要手动检查或更新 patch 脚本。${NC}"
     echo -e "  ${RED}提示：设置 DEBUG=1 运行以查看详细匹配过程：${NC}"
