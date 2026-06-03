@@ -368,16 +368,58 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
       const models = (api.config as any)?.models;
       const providerCfg = models?.providers?.[providerKey];
       const baseUrl = providerCfg?.baseUrl ?? providerCfg?.baseURL;
-      const apiKey = providerCfg?.apiKey;
+
+      // Resolve the API key in two steps:
+      //   1. OpenClaw's auth-profiles (api.resolveProviderAuth) — supports
+      //      api-key profiles, env vars, and OAuth without forcing users to
+      //      duplicate the key under `models.providers[*].apiKey`.
+      //   2. Plain `models.providers[providerKey].apiKey` — backwards-compat
+      //      path for hosts that don't expose resolveProviderAuth, and for
+      //      users who already configure the key inline.
+      // baseUrl is intentionally still read from `models.providers` only,
+      // since auth-profiles doesn't carry endpoint information.
+      // See issue #90.
+      let apiKey: string | undefined;
+      let apiKeySource = "models.providers";
+      const resolveAuth = (api as unknown as {
+        resolveProviderAuth?: (
+          providerId?: string,
+        ) => { apiKey?: string; source?: string; mode?: string } | undefined;
+      }).resolveProviderAuth;
+      if (typeof resolveAuth === "function") {
+        try {
+          const auth = resolveAuth.call(api, providerKey);
+          if (auth?.apiKey) {
+            apiKey = auth.apiKey;
+            apiKeySource = auth.source === "profile"
+              ? `auth-profile${auth.mode ? ":" + auth.mode : ""}`
+              : (auth.source ?? "auth-profile");
+          }
+        } catch (err) {
+          logger.debug?.(
+            `[context-offload] resolveProviderAuth("${providerKey}") failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      if (!apiKey) {
+        apiKey = providerCfg?.apiKey;
+      }
 
       if (baseUrl && apiKey) {
+        logger.debug?.(
+          `[context-offload] Local LLM provider="${providerKey}" model="${modelId}" apiKey source=${apiKeySource}`,
+        );
         backendClient = new LocalLlmClient(
           { baseUrl, apiKey, model: modelId, temperature: offloadConfig.temperature, timeoutMs: offloadConfig.backendTimeoutMs },
           logger,
         );
       } else {
+        const missing = [
+          baseUrl ? null : `baseUrl (set models.providers["${providerKey}"].baseUrl)`,
+          apiKey ? null : `apiKey (set an auth-profile for "${providerKey}", or models.providers["${providerKey}"].apiKey)`,
+        ].filter(Boolean).join(", ");
         logger.error(
-          `[context-offload] Local LLM mode failed: provider "${providerKey}" not found or missing baseUrl/apiKey in models.providers. ` +
+          `[context-offload] Local LLM mode failed: provider "${providerKey}" is missing ${missing}. ` +
           `L1/L1.5/L2 disabled.`,
         );
       }
