@@ -135,9 +135,19 @@ graph LR
 ### 1.1 Install the plugin
 
 ```bash
-openclaw plugins install @tencentdb-agent-memory/memory-tencentdb
+# Always pin an exact version — OpenClaw's plugin manager does not accept
+# semver ranges (^/~) in ~/.openclaw/npm/package.json and will silently
+# disable the plugin on the next update if it sees one. See issue #107.
+openclaw plugins install @tencentdb-agent-memory/memory-tencentdb@0.3.6
 openclaw gateway restart
 ```
+
+> **Upgrading?** Do *not* run `npm install @tencentdb-agent-memory/memory-tencentdb@latest`
+> inside `~/.openclaw/npm/` — npm will rewrite the spec to a caret range
+> (`"^0.3.6"`) which OpenClaw rejects with
+> `unsupported npm spec: use an exact version or dist-tag`. Re-run the
+> `openclaw plugins install …@<version>` command above (or `npm install
+> …@<version> --save-exact`) to keep the spec exact.
 
 ### 1.2 Zero-config to enable
 

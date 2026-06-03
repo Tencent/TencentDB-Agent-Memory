@@ -139,9 +139,19 @@ graph LR
 ### 1.1 安装插件
 
 ```bash
-openclaw plugins install @tencentdb-agent-memory/memory-tencentdb
+# 务必固定到具体版本号 —— OpenClaw 的插件管理器不接受 ~/.openclaw/npm/package.json
+# 里的 semver 区间（^/~），若检测到范围声明会在下一次更新时静默禁用插件。
+# 详情见 issue #107。
+openclaw plugins install @tencentdb-agent-memory/memory-tencentdb@0.3.6
 openclaw gateway restart
 ```
+
+> **升级注意**：**不要**在 `~/.openclaw/npm/` 目录里跑 `npm install
+> @tencentdb-agent-memory/memory-tencentdb@latest`——npm 默认会把版本
+> 改写成 caret 区间（`"^0.3.6"`），OpenClaw 启动时会以
+> `unsupported npm spec: use an exact version or dist-tag` 报错并禁用
+> 插件。请用上面的 `openclaw plugins install …@<version>`（或
+> `npm install …@<version> --save-exact`）来确保版本保持精确。
 
 ### 1.2 零配置启用
 
