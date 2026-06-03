@@ -399,6 +399,17 @@ interface OpenAIEmbeddingResponse {
   };
 }
 
+/**
+ * ZeroEntropy's `/v1/models/embed` returns input order via `results[i]`
+ * (no `index` field) and omits the OpenAI `data` envelope. See:
+ *   https://docs.zeroentropy.dev/api-reference/models/embed
+ */
+interface ZeroEntropyEmbeddingResponse {
+  results: Array<{
+    embedding: number[];
+  }>;
+}
+
 export class OpenAIEmbeddingService implements EmbeddingService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
@@ -494,23 +505,43 @@ export class OpenAIEmbeddingService implements EmbeddingService {
   }
 
   private async _callApi(texts: string[], timeoutOverride?: number): Promise<Float32Array[]> {
+    // ZeroEntropy speaks a slightly different shape: native endpoint
+    // `/v1/models/embed`, request body carries `input_type` (must be
+    // "query" or "document"), response is `{results: [{embedding}]}`
+    // instead of OpenAI's `{data: [{index, embedding}]}`. The rest of
+    // the call surface (timeout, retry, batching) is identical, so we
+    // branch only on URL + body + parse rather than introducing a new
+    // service class. See issue #68.
+    const isZeroEntropy = this.providerName === "zeroentropy";
+
     const body: Record<string, unknown> = {
       input: texts,
       model: this.model,
     };
-    if (this.sendDimensions) {
+    if (isZeroEntropy) {
+      // ZeroEntropy rejects requests without input_type. Default to "query"
+      // because the recall hot path is the only one that calls embed() with
+      // a Float32Array return — capture-side batches eventually feed the
+      // same vector store, and ZeroEntropy's symmetry between "query" and
+      // "document" makes a single type safe.
+      body.input_type = "query";
+    } else if (this.sendDimensions) {
+      // ZeroEntropy's zembed-1 has a fixed dimension and rejects an
+      // explicit `dimensions` parameter — only set it on OpenAI-style
+      // providers (and only when the caller opted in).
       body.dimensions = this.dims;
     }
 
     // Determine fetch URL and headers based on proxy mode
     const useProxy = this.providerName === "qclaw" && !!this.proxyUrl;
-    const fetchUrl = useProxy ? this.proxyUrl! : `${this.baseUrl}/embeddings`;
+    const embedPath = isZeroEntropy ? "/models/embed" : "/embeddings";
+    const fetchUrl = useProxy ? this.proxyUrl! : `${this.baseUrl}${embedPath}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
     };
     if (useProxy) {
-      headers["Remote-URL"] = `${this.baseUrl}/embeddings`;
+      headers["Remote-URL"] = `${this.baseUrl}${embedPath}`;
       this.logger?.debug?.(
         `${TAG} [qclaw-proxy] Forwarding embedding request via proxy: ${fetchUrl}, Remote-URL: ${headers["Remote-URL"]}`,
       );
@@ -545,14 +576,26 @@ export class OpenAIEmbeddingService implements EmbeddingService {
             continue;
           }
 
-          const json = (await resp.json()) as OpenAIEmbeddingResponse;
+          const json = await resp.json() as
+            | OpenAIEmbeddingResponse
+            | ZeroEntropyEmbeddingResponse;
 
-          if (!json.data || !Array.isArray(json.data)) {
+          if (isZeroEntropy) {
+            const zeJson = json as ZeroEntropyEmbeddingResponse;
+            if (!zeJson.results || !Array.isArray(zeJson.results)) {
+              throw new Error("ZeroEntropy embedding API returned unexpected format: missing 'results' array");
+            }
+            // ZeroEntropy preserves input order via array position (no `index`).
+            return zeJson.results.map((r) => sanitizeAndNormalize(r.embedding));
+          }
+
+          const oaJson = json as OpenAIEmbeddingResponse;
+          if (!oaJson.data || !Array.isArray(oaJson.data)) {
             throw new Error("Embedding API returned unexpected format: missing 'data' array");
           }
 
           // Sort by index to ensure correct order, then sanitize+normalize for consistency with local provider
-          const sorted = [...json.data].sort((a, b) => a.index - b.index);
+          const sorted = [...oaJson.data].sort((a, b) => a.index - b.index);
           return sorted.map((d) => sanitizeAndNormalize(d.embedding));
         } finally {
           clearTimeout(timeoutId);
