@@ -159,10 +159,17 @@ backup_file() {
 }
 
 # ─── 查找所有候选文件 ────────────────────────────────────────────
-# 收集所有包含 after_tool_call 的 JS 文件（不限子目录深度）
+# 收集所有包含 after_tool_call 的 JS 文件（不限子目录深度）。
+# 再要求出现 runAfterToolCall 调用点：去除仅在 schema/test-contract 中
+# 以字面量形式出现 "after_tool_call" 的非运行时文件，避免后续策略对其
+# 留下空操作备份。
 CANDIDATE_FILES=()
 while IFS= read -r candidate_file; do
-    CANDIDATE_FILES+=("$candidate_file")
+    if grep -q 'runAfterToolCall' "$candidate_file" 2>/dev/null; then
+        CANDIDATE_FILES+=("$candidate_file")
+    else
+        debug "${candidate_file#$DIST_DIR/} — 无 runAfterToolCall 调用点（仅含字面量 \"after_tool_call\"），不作为候选"
+    fi
 done < <(grep -rl 'after_tool_call' "$DIST_DIR" --include='*.js' 2>/dev/null || true)
 
 if [[ ${#CANDIDATE_FILES[@]} -eq 0 ]]; then
@@ -174,6 +181,7 @@ info "找到 ${#CANDIDATE_FILES[@]} 个候选文件"
 PATCHED=0
 SKIPPED=0
 FAILED=0
+CLEANED=0
 
 # ─── 对每个候选文件尝试多种策略 ──────────────────────────────────
 if [[ ${#CANDIDATE_FILES[@]} -gt 0 ]]; then
@@ -198,6 +206,20 @@ for f in "${CANDIDATE_FILES[@]}"; do
     # 确认 durationMs 附近有 after_tool_call 上下文（避免误匹配 before_compaction 等）
     if ! perl -0777 -ne 'exit(0) if /after_tool_call[\s\S]{0,2000}durationMs/; exit(1)' "$f" 2>/dev/null; then
         debug "$relpath — durationMs 不在 after_tool_call 上下文中，跳过"
+        ((SKIPPED++)) || true
+        continue
+    fi
+
+    # OpenClaw 5.22+ 内联展开形态检测：durationMs 仅出现在条件展开
+    # (...cond ? { durationMs: ... } : {}) 中，调用点没有 hookEvent 字面量、
+    # 函数作用域也没有 ctx（只有 params）。当前注入文本 ctx.params.session?.messages
+    # 在该作用域下会触发 ReferenceError，且 params 上也没有 session 字段，
+    # patch script 无法在此位置完成注入 —— 需要 OpenClaw 上游把 session.messages
+    # 透传进 runAgentHarnessAfterToolCallHook 的函数签名。提前显式跳过，
+    # 避免后续策略空跑并留下误导性的 .pre-offload-patch.bak。
+    if perl -0777 -ne 'exit(0) if /\.\.\.\s*\w+\s*\.\s*startedAt\s*!=\s*null\s*\?\s*\{\s*durationMs\s*:/; exit(1)' "$f" 2>/dev/null \
+       && ! grep -qE '(^|\W)(hookEvent|hook_event)(\W|$)' "$f" 2>/dev/null; then
+        info "$relpath — OpenClaw 5.22+ 内联展开形态（调用点无 ctx 作用域），跳过；该位置需 OpenClaw 上游修改才能注入 messages"
         ((SKIPPED++)) || true
         continue
     fi
@@ -303,13 +325,29 @@ for f in "${CANDIDATE_FILES[@]}"; do
 done
 fi
 
+# ─── 空操作备份清理 ──────────────────────────────────────────────
+# 全局扫描 $DIST_DIR 下所有 .pre-offload-patch.bak：若与当前文件字节
+# 相等，说明本次或历史某次执行未真正改动文件（perl regex 未命中、
+# 策略 4 已恢复、或候选过滤新版本剔除了该文件）。保留这种 .bak 会让
+# 用户误以为 patch 改过文件并怀疑它导致系统异常（实际我们今天就遇到
+# 过）。统一在末尾做一次清理，让 ".bak 存在" 与 "脚本确实改动了文件"
+# 严格等价。
+while IFS= read -r bak; do
+    src="${bak%.pre-offload-patch.bak}"
+    if [[ -f "$src" ]] && cmp -s "$src" "$bak"; then
+        rm -f "$bak"
+        debug "${src#$DIST_DIR/} — 清理空备份 (no-op .pre-offload-patch.bak)"
+        ((CLEANED++)) || true
+    fi
+done < <(find "$DIST_DIR" -name '*.pre-offload-patch.bak' 2>/dev/null)
+
 # ─── 结果报告 ────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Patch 完成  (OpenClaw $VERSION)${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  成功: ${GREEN}${PATCHED}${NC}  跳过: ${YELLOW}${SKIPPED}${NC}  失败: ${RED}${FAILED}${NC}"
+echo -e "  成功: ${GREEN}${PATCHED}${NC}  跳过: ${YELLOW}${SKIPPED}${NC}  失败: ${RED}${FAILED}${NC}  清理空备份: ${CYAN}${CLEANED}${NC}"
 echo ""
 if [[ $PATCHED -gt 0 ]]; then
     echo -e "  ${CYAN}重启 OpenClaw 后生效。${NC}"
