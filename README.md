@@ -244,6 +244,41 @@ docker exec -it hermes-memory hermes
 
 > The image ships with Tencent Cloud DeepSeek-V3.2 as the default. If you use this model, omit `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_PROVIDER` and pass only `MODEL_API_KEY`.
 
+### 3. Windows (native, no Docker)
+
+Two scripts under [`scripts/`](./scripts/) bring up the Gateway natively on Windows so you don't have to spin up Docker / WSL just to run the plugin. See issue [#113](https://github.com/Tencent/TencentDB-Agent-Memory/issues/113).
+
+**Prerequisites**
+
+- Windows 10 / 11 with PowerShell 5.1+ (built-in).
+- Node.js ≥ 22.16 — install from <https://nodejs.org/> and confirm `node -v` works in a new terminal.
+- The plugin's npm package on disk (see §1.1 — the Gateway entry lives at `<install>/src/gateway/server.ts`).
+
+**One-shot start**
+
+```cmd
+:: cmd.exe / double-click
+set MEMORY_TENCENTDB_LLM_API_KEY=sk-...
+scripts\memory-tencentdb-ctl.bat start
+```
+
+```powershell
+# PowerShell
+$env:MEMORY_TENCENTDB_LLM_API_KEY = "sk-..."
+.\scripts\memory-tencentdb-ctl.ps1 start
+```
+
+The script:
+
+1. **Resolves paths** — `MEMORY_TENCENTDB_ROOT` (default `%USERPROFILE%\.memory-tencentdb`), `TDAI_DATA_DIR`, log dir, install dir — using the same env-var names as the POSIX `ctl.sh`, so a shared config carries over.
+2. **Checks dependencies** — fails fast if `node` or `npx` is not on `PATH`.
+3. **Spawns the Gateway** detached (`Start-Process -WindowStyle Hidden`), redirects stdout/stderr to `gateway.stdout.log` / `gateway.stderr.log`, writes the PID to `gateway.pid`, and waits up to 15 s for `GET /health` to return `ok`.
+4. **Other subcommands**: `stop`, `restart`, `status`, `health`, `logs` (use `-NoFollow` for a one-shot dump). `help` prints the full env-var reference and resolved paths.
+
+Listening / killing uses `Get-NetTCPConnection` + `Stop-Process` (no need for `lsof` / `kill`), with a `netstat` fallback for older PowerShell hosts.
+
+> `MEMORY_TENCENTDB_GATEWAY_CMD` still overrides the auto-derived spawn command, mirroring the POSIX script's behaviour — handy if you want to run the bundled JavaScript build instead of `npx tsx`.
+
 ---
 
 

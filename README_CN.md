@@ -249,6 +249,40 @@ docker exec -it hermes-memory hermes
 
 > 镜像内置了腾讯云 DeepSeek-V3.2 的默认值，如果你使用该模型，`MODEL_BASE_URL`/`MODEL_NAME`/`MODEL_PROVIDER` 可以省略，只传 `MODEL_API_KEY` 即可。
 
+### 3. Windows 原生启动（无 Docker）
+
+[`scripts/`](./scripts/) 目录下提供两个脚本，专门用于在 Windows 上原生拉起 Gateway——不必再为了一个插件去装 Docker / WSL。详见 issue [#113](https://github.com/Tencent/TencentDB-Agent-Memory/issues/113)。
+
+**前置依赖**
+
+- Windows 10 / 11 + PowerShell 5.1+（系统内置）。
+- Node.js ≥ 22.16 —— 从 <https://nodejs.org/> 安装，确认新开终端里 `node -v` 可用。
+- 已经在磁盘上装好本插件的 npm 包（参考 §1.1，Gateway 入口在 `<install>/src/gateway/server.ts`）。
+
+**一键启动**
+
+```cmd
+:: cmd.exe / 双击
+set MEMORY_TENCENTDB_LLM_API_KEY=sk-...
+scripts\memory-tencentdb-ctl.bat start
+```
+
+```powershell
+# PowerShell
+$env:MEMORY_TENCENTDB_LLM_API_KEY = "sk-..."
+.\scripts\memory-tencentdb-ctl.ps1 start
+```
+
+脚本做的事：
+
+1. **解析路径** —— `MEMORY_TENCENTDB_ROOT`（默认 `%USERPROFILE%\.memory-tencentdb`）、`TDAI_DATA_DIR`、日志目录、install 目录，环境变量名与 POSIX 版 `ctl.sh` 完全一致，配置可在 Linux / Windows 之间复用。
+2. **依赖检查** —— 缺少 `node` 或 `npx` 立即报错退出。
+3. **后台启动 Gateway**（`Start-Process -WindowStyle Hidden`），把 stdout/stderr 重定向到 `gateway.stdout.log` / `gateway.stderr.log`，PID 写入 `gateway.pid`，最多等 15 秒直到 `GET /health` 返回 `ok`。
+4. **其他子命令**：`stop`、`restart`、`status`、`health`、`logs`（加 `-NoFollow` 只打印最后一段而不 tail）。`help` 会列出全部环境变量与解析后的路径。
+
+监听检测和进程结束用 `Get-NetTCPConnection` + `Stop-Process`（不需要 `lsof` / `kill`），老 PowerShell 主机会自动回退到 `netstat`。
+
+> `MEMORY_TENCENTDB_GATEWAY_CMD` 仍然可以覆盖自动生成的启动命令，行为与 POSIX 脚本一致——比如你想直接跑打包后的 JS 而不走 `npx tsx`。
 
 ---
 
