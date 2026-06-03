@@ -404,6 +404,39 @@ Debugging no longer means probing an opaque database — it becomes a determinis
 
 ---
 
+## Troubleshooting
+
+### Linux: `ENOENT` errors for macOS or `/home/user/` paths
+
+If your logs show repeated `ENOENT` for paths like
+`/Users/<name>/Library/Application Support/Claude/...`,
+`/home/user/agent_memory/memory.json`, or
+`/home/user/data/agent_memory/config/user_profile.yaml`, the source is **not**
+this plugin. Those paths are not referenced anywhere in the plugin's source
+tree — they come from the OpenClaw host's own startup probes (e.g. searching
+for a Claude Desktop config file). On Linux they will always miss, but they
+don't affect any memory-tencentdb functionality.
+
+How memory-tencentdb resolves paths is platform-aware:
+
+| Path | Resolution order |
+|---|---|
+| Plugin state dir | `runtime.state.resolveStateDir()` (OpenClaw API) → `$OPENCLAW_STATE_DIR` → `~/.openclaw` |
+| Gateway data dir | `$TDAI_DATA_DIR` → `$HOME`/`$USERPROFILE` → `/tmp` (then `…/.memory-tencentdb/memory-tdai`) |
+| Hook policy config | `$TDAI_GATEWAY_CONFIG` → `$CWD/openclaw.json` → `~/.openclaw/openclaw.json` |
+
+All three use `os.homedir()` plus an `existsSync` guard before reading,
+so a missing file is a silent fall-through, not an error.
+
+**To suppress the host's noise**: upgrade the OpenClaw host (newer versions
+short-circuit the Claude Desktop probe on non-macOS platforms), or
+filter `ENOENT` lines whose path matches `Library/Application Support` or
+`/home/user/` at the log-collector level. See issue
+[#103](https://github.com/Tencent/TencentDB-Agent-Memory/issues/103) for
+context.
+
+---
+
 ## Community & Contributing
 
 We welcome every kind of contribution — bug reports, feature ideas, doc fixes, benchmark reproductions, ecosystem integrations, or a Pull Request. Agent memory is far from a solved problem, and we'd love to figure it out together.

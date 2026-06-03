@@ -407,6 +407,31 @@ export MEMORY_TENCENTDB_GATEWAY_API_KEY="<与 Gateway 同一份密钥>"
 | [`openclaw.plugin.json`](./openclaw.plugin.json) | OpenClaw 插件声明与配置 Schema |
 
 ---
+
+## 故障排查
+
+### Linux 下出现 macOS 或 `/home/user/` 路径的 `ENOENT` 报错
+
+若日志中反复出现以下路径的 `ENOENT`：
+- `/Users/<name>/Library/Application Support/Claude/...`
+- `/home/user/agent_memory/memory.json`
+- `/home/user/data/agent_memory/config/user_profile.yaml`
+
+它们都**不**来自本插件的源码（仓库内 grep 不到这些路径），而是 OpenClaw 宿主在启动时尝试探测 Claude Desktop 配置等的内部路径。在 Linux 上它们必然不存在，但**不会**影响 memory-tencentdb 的任何记忆能力。
+
+本插件的路径解析在所有平台都做了适配：
+
+| 路径 | 解析顺序 |
+|---|---|
+| 插件状态目录 | `runtime.state.resolveStateDir()`（OpenClaw API）→ `$OPENCLAW_STATE_DIR` → `~/.openclaw` |
+| Gateway 数据目录 | `$TDAI_DATA_DIR` → `$HOME` / `$USERPROFILE` → `/tmp`（拼接 `…/.memory-tencentdb/memory-tdai`） |
+| Hook 策略配置 | `$TDAI_GATEWAY_CONFIG` → `$CWD/openclaw.json` → `~/.openclaw/openclaw.json` |
+
+三处都用 `os.homedir()` 兜底，并在读取前 `existsSync` 守卫——文件缺失时静默回退，不会产生 error 日志。
+
+**抑制宿主噪声的两种方法**：升级 OpenClaw（新版本在非 macOS 平台会跳过 Claude Desktop 探测）；或在日志收集层过滤路径中包含 `Library/Application Support` 或 `/home/user/` 的 `ENOENT` 行。详见 issue [#103](https://github.com/Tencent/TencentDB-Agent-Memory/issues/103)。
+
+---
 ## 社区与贡献
 
 我们欢迎一切形式的贡献——Bug 反馈、功能建议、文档勘误、Benchmark 复现、生态集成，或者一个 Pull Request 都可以。Agent 记忆这件事远未有定论，希望和大家一起把它做出来。
