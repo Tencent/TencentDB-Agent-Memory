@@ -636,13 +636,16 @@ export class OpenAIEmbeddingService implements EmbeddingService {
  * ZeroEntropy native embedding adapter.
  *
  * Reuses {@link OpenAIEmbeddingConfig} for the wire-config shape (baseUrl /
- * apiKey / model / dimensions are identical), but the wire format diverges
- * in three places, so we keep this provider on its own class instead of
- * branching {@link OpenAIEmbeddingService}:
+ * apiKey / model / dimensions / sendDimensions are identical), but the wire
+ * format diverges in three places, so we keep this provider on its own class
+ * instead of branching {@link OpenAIEmbeddingService}:
  *
  * 1. Endpoint is `${baseUrl}/models/embed` (not `/embeddings`).
- * 2. Request body requires `input_type` (`"query"` or `"document"`) and
- *    rejects an explicit `dimensions` field (zembed-1 is fixed-dim).
+ * 2. Request body requires `input_type` (`"query"` or `"document"`).
+ *    `dimensions` is optional — for `zembed-1` the accepted values are the
+ *    Matryoshka set [2560, 1280, 640, 320, 160, 80, 40]; any other value is
+ *    rejected by the server. The config's `sendDimensions` flag (default
+ *    true) controls whether it is forwarded, matching the OpenAI path.
  * 3. Response envelope is `{ results: [{ embedding }] }` and preserves
  *    input order via array position rather than an `index` field.
  *
@@ -656,6 +659,7 @@ export class ZeroEntropyEmbeddingService implements EmbeddingService {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly dims: number;
+  private readonly sendDimensions: boolean;
   private readonly maxInputChars?: number;
   private readonly timeoutMs: number;
   private readonly logger?: Logger;
@@ -677,6 +681,7 @@ export class ZeroEntropyEmbeddingService implements EmbeddingService {
     this.apiKey = config.apiKey;
     this.model = config.model;
     this.dims = config.dimensions;
+    this.sendDimensions = config.sendDimensions ?? true;
     this.maxInputChars = config.maxInputChars && config.maxInputChars > 0 ? config.maxInputChars : undefined;
     this.timeoutMs = config.timeoutMs && config.timeoutMs > 0 ? config.timeoutMs : DEFAULT_API_TIMEOUT_MS;
     this.logger = logger;
@@ -729,13 +734,19 @@ export class ZeroEntropyEmbeddingService implements EmbeddingService {
     // that returns a Float32Array; capture-side batches eventually feed
     // the same vector store, and ZeroEntropy's symmetry between "query"
     // and "document" makes a single type safe across both directions.
-    // `dimensions` is intentionally omitted — zembed-1 is fixed-dim and
-    // rejects explicit overrides.
     const body: Record<string, unknown> = {
       input: texts,
       model: this.model,
       input_type: "query",
     };
+    if (this.sendDimensions) {
+      // ZeroEntropy's docs list `dimensions` as optional. For zembed-1 the
+      // accepted set is [2560, 1280, 640, 320, 160, 80, 40] (Matryoshka);
+      // any other value is rejected server-side. We forward the user's
+      // configured value verbatim — clamping silently would surprise users
+      // who deliberately picked a smaller dim for storage savings.
+      body.dimensions = this.dims;
+    }
 
     const fetchUrl = `${this.baseUrl}/models/embed`;
     const headers: Record<string, string> = {
