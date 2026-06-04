@@ -135,9 +135,13 @@ graph LR
 ### 1.1 Install the plugin
 
 ```bash
-openclaw plugins install @tencentdb-agent-memory/memory-tencentdb
+openclaw plugins install @tencentdb-agent-memory/memory-tencentdb@0.3.6
 openclaw gateway restart
 ```
+
+For OpenClaw installs, use an exact package version. OpenClaw does not support
+npm semver ranges such as `^0.3.6`; if you install with npm directly, run
+`npm install --save-exact @tencentdb-agent-memory/memory-tencentdb@0.3.6`.
 
 ### 1.2 Zero-config to enable
 
