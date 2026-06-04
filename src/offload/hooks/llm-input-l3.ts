@@ -318,24 +318,24 @@ export function createLlmInputL3Handler(
         // that keep tokens above threshold
         if (_emergencyCycleDetected) {
           logger.warn(`[context-offload] L3(llm_input) EMERGENCY CYCLE DETECTED: tokens≈${workingTokens} still >= ${emergencyThreshold} after previous compression, skipping to prevent infinite loop`);
-          break;
-        }
-        _emergencyTriggered = true;
-        _emergencyCycleDetected = true;  // Mark as triggered for cycle detection
-        logger.warn(`[context-offload] L3(llm_input) EMERGENCY: tokens≈${workingTokens} >= ${emergencyThreshold} (force=${forceEmergency}), target=${emergencyTarget}`);
-        const emergencyResult = emergencyCompress(historyMessages, emergencyTarget, countTokens, sysPrompt, promptText, logger);
-        _emergencyDeleted = emergencyResult.deletedCount;
-        logger.warn(`[context-offload] L3(llm_input) EMERGENCY done: deleted=${emergencyResult.deletedCount}, remaining≈${emergencyResult.remainingTokens}, deletedIds=${emergencyResult.deletedToolCallIds.length}`);
-        if (emergencyResult.deletedToolCallIds.length > 0) {
-          const statusUpdates = new Map<string, string | boolean>();
-          for (const id of emergencyResult.deletedToolCallIds) {
-            statusUpdates.set(id, "deleted");
-            stateManager.confirmedOffloadIds.add(id);
-            stateManager.deletedOffloadIds.add(id);
+        } else {
+          _emergencyTriggered = true;
+          _emergencyCycleDetected = true;  // Mark as triggered for cycle detection
+          logger.warn(`[context-offload] L3(llm_input) EMERGENCY: tokens≈${workingTokens} >= ${emergencyThreshold} (force=${forceEmergency}), target=${emergencyTarget}`);
+          const emergencyResult = emergencyCompress(historyMessages, emergencyTarget, countTokens, sysPrompt, promptText, logger);
+          _emergencyDeleted = emergencyResult.deletedCount;
+          logger.warn(`[context-offload] L3(llm_input) EMERGENCY done: deleted=${emergencyResult.deletedCount}, remaining≈${emergencyResult.remainingTokens}, deletedIds=${emergencyResult.deletedToolCallIds.length}`);
+          if (emergencyResult.deletedToolCallIds.length > 0) {
+            const statusUpdates = new Map<string, string | boolean>();
+            for (const id of emergencyResult.deletedToolCallIds) {
+              statusUpdates.set(id, "deleted");
+              stateManager.confirmedOffloadIds.add(id);
+              stateManager.deletedOffloadIds.add(id);
+            }
+            markOffloadStatus(stateManager.ctx, statusUpdates).catch(() => {});
           }
-          markOffloadStatus(stateManager.ctx, statusUpdates).catch(() => {});
+          dumpMessagesSnapshot("after-emergency", historyMessages, logger);
         }
-        dumpMessagesSnapshot("after-emergency", historyMessages, logger);
       }
 
       if (stateManager.isLoaded()) await stateManager.save();
