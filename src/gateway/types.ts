@@ -11,6 +11,18 @@ export interface GatewayErrorResponse {
   code?: string;
 }
 
+export interface ApiResponse<T> {
+  success: boolean;
+  payload: T | null;
+  error: ApiError | null;
+  timestamp: number;
+}
+
+export interface ApiError {
+  code: string;
+  message: string;
+}
+
 // ============================
 // /health
 // ============================
@@ -92,6 +104,37 @@ export interface ConversationSearchResponse {
 }
 
 // ============================
+// /api/memory/markdown-files
+// ============================
+
+export type MarkdownView = "domain" | "profile";
+
+export interface ListMarkdownFilesPayload {
+  files: MarkdownFileInfo[];
+}
+
+export interface MarkdownFileInfo {
+  file_id: string;
+  view: MarkdownView;
+  title: string;
+  updated_at: string;
+  version: string;
+  summary?: string;
+  heat?: number;
+}
+
+export interface MarkdownFileDetail extends MarkdownFileInfo {
+  content: string;
+  created_at?: string;
+  scene_navigation?: string;
+}
+
+export interface UpdateMarkdownFileRequest {
+  expected_version: string;
+  content: string;
+}
+
+// ============================
 // /session/end
 // ============================
 
@@ -123,6 +166,12 @@ export interface SeedRequest {
    * This is the same structure accepted by `openclaw memory-tdai seed --input`.
    */
   data: unknown;
+  /**
+   * Seed target mode.
+   * - append: write into the live gateway memory-data directory (default)
+   * - test: write into an isolated memory-data/test-runs/seed-* directory
+   */
+  mode?: "append" | "test";
   /** Fallback session key when input sessions lack one. */
   session_key?: string;
   /** Require each round to have both user and assistant messages. */
@@ -134,10 +183,12 @@ export interface SeedRequest {
 }
 
 export interface SeedResponse {
+  mode: "append" | "test";
   sessions_processed: number;
   rounds_processed: number;
   messages_processed: number;
   l0_recorded: number;
+  l1_recorded: number;
   duration_ms: number;
   output_dir: string;
 }

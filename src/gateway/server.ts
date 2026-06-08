@@ -9,12 +9,16 @@
  *   POST /search/conversations — L0 conversation search
  *   POST /session/end         — Session end + flush
  *   POST /seed               — Batch seed historical conversations (L0 → L1)
+ *   GET  /api/memory/markdown-files — List L2/L3 Markdown files
+ *   GET  /api/memory/markdown-files/{file_id} — Read L2/L3 Markdown content
+ *   PATCH /api/memory/markdown-files/{file_id} — Update editable Markdown content
  *
  * Built with Node.js native `http` module — no Express/Fastify dependency.
  * Designed to run as a managed sidecar alongside Hermes.
  */
 
 import http from "node:http";
+import path from "node:path";
 import { URL } from "node:url";
 import { TdaiCore } from "../core/tdai-core.js";
 import { StandaloneHostAdapter } from "../adapters/standalone/host-adapter.js";
@@ -37,14 +41,24 @@ import type {
   SeedRequest,
   SeedResponse,
   GatewayErrorResponse,
+  ApiResponse,
+  MarkdownView,
+  UpdateMarkdownFileRequest,
 } from "./types.js";
 import type { Logger } from "../core/types.js";
 import { validateAndNormalizeRaw, fillTimestamps, SeedValidationError } from "../core/seed/input.js";
 import { executeSeed } from "../core/seed/seed-runtime.js";
 import type { SeedProgress } from "../core/seed/types.js";
+import {
+  getMarkdownFile,
+  listMarkdownFiles,
+  MarkdownFilesError,
+  updateMarkdownFile,
+} from "./markdown-files.js";
 
 const TAG = "[tdai-gateway]";
 const VERSION = "0.1.0";
+type SeedMode = NonNullable<SeedRequest["mode"]>;
 
 // ============================
 // Console logger (for standalone gateway — no OpenClaw logger available)
@@ -90,6 +104,53 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 
 function sendError(res: http.ServerResponse, status: number, message: string): void {
   sendJson(res, status, { error: message } satisfies GatewayErrorResponse);
+}
+
+function sendApiSuccess<T>(res: http.ServerResponse, payload: T): void {
+  const body: ApiResponse<T> = {
+    success: true,
+    payload,
+    error: null,
+    timestamp: Date.now(),
+  };
+  sendJson(res, 200, body);
+}
+
+function sendApiError(
+  res: http.ServerResponse,
+  status: number,
+  code: string,
+  message: string,
+): void {
+  const body: ApiResponse<null> = {
+    success: false,
+    payload: null,
+    error: { code, message },
+    timestamp: Date.now(),
+  };
+  sendJson(res, status, body);
+}
+
+function parseSeedMode(value: unknown): SeedMode | null {
+  if (value == null || value === "") return "append";
+  if (value === "append" || value === "test") return value;
+  return null;
+}
+
+function parseMarkdownView(value: unknown): MarkdownView | null {
+  if (value === "domain" || value === "profile") return value;
+  return null;
+}
+
+function createSeedTestOutputDir(baseDir: string): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ts =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const suffix = Math.random().toString(16).slice(2, 8);
+
+  return path.join(baseDir, "test-runs", `seed-${ts}-${suffix}`);
 }
 
 // ============================
@@ -175,7 +236,7 @@ export class TdaiGateway {
 
     // CORS headers (for development)
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     if (method === "OPTIONS") {
@@ -185,6 +246,20 @@ export class TdaiGateway {
     }
 
     try {
+      if (method === "GET" && pathname === "/api/memory/markdown-files") {
+        return await this.handleListMarkdownFiles(url, res);
+      }
+
+      const markdownFilePrefix = "/api/memory/markdown-files/";
+      if (method === "GET" && pathname.startsWith(markdownFilePrefix)) {
+        const fileId = decodeURIComponent(pathname.slice(markdownFilePrefix.length));
+        return await this.handleGetMarkdownFile(fileId, res);
+      }
+      if (method === "PATCH" && pathname.startsWith(markdownFilePrefix)) {
+        const fileId = decodeURIComponent(pathname.slice(markdownFilePrefix.length));
+        return await this.handleUpdateMarkdownFile(req, fileId, res);
+      }
+
       switch (`${method} ${pathname}`) {
         case "GET /health":
           return this.handleHealth(res);
@@ -225,6 +300,83 @@ export class TdaiGateway {
       },
     };
     sendJson(res, 200, response);
+  }
+
+  private async handleListMarkdownFiles(url: URL, res: http.ServerResponse): Promise<void> {
+    const view = parseMarkdownView(url.searchParams.get("view") ?? "domain");
+    if (!view) {
+      sendApiError(
+        res,
+        400,
+        "MEMORY_MARKDOWN_INVALID_VIEW",
+        "Invalid markdown view. Expected domain or profile",
+      );
+      return;
+    }
+
+    try {
+      const payload = await listMarkdownFiles(this.config.data.baseDir, view);
+      sendApiSuccess(res, payload);
+    } catch (err) {
+      if (err instanceof MarkdownFilesError) {
+        sendApiError(res, err.status, err.code, err.message);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private async handleGetMarkdownFile(fileId: string, res: http.ServerResponse): Promise<void> {
+    try {
+      const payload = await getMarkdownFile(this.config.data.baseDir, fileId);
+      sendApiSuccess(res, payload);
+    } catch (err) {
+      if (err instanceof MarkdownFilesError) {
+        sendApiError(res, err.status, err.code, err.message);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private async handleUpdateMarkdownFile(
+    req: http.IncomingMessage,
+    fileId: string,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    let body: UpdateMarkdownFileRequest;
+    try {
+      body = await parseJsonBody<UpdateMarkdownFileRequest>(req);
+    } catch {
+      sendApiError(res, 400, "MEMORY_MARKDOWN_INVALID_BODY", "Invalid JSON body");
+      return;
+    }
+
+    if (
+      !body ||
+      typeof body.content !== "string" ||
+      typeof body.expected_version !== "string" ||
+      body.expected_version.length === 0
+    ) {
+      sendApiError(
+        res,
+        400,
+        "MEMORY_MARKDOWN_INVALID_BODY",
+        "Expected body with content and expected_version",
+      );
+      return;
+    }
+
+    try {
+      const payload = await updateMarkdownFile(this.config.data.baseDir, fileId, body);
+      sendApiSuccess(res, payload);
+    } catch (err) {
+      if (err instanceof MarkdownFilesError) {
+        sendApiError(res, err.status, err.code, err.message);
+        return;
+      }
+      throw err;
+    }
   }
 
   private async handleRecall(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -345,6 +497,12 @@ export class TdaiGateway {
       return;
     }
 
+    const mode = parseSeedMode(body.mode);
+    if (!mode) {
+      sendError(res, 400, 'Invalid seed mode. Expected "append" or "test".');
+      return;
+    }
+
     // Validate and normalize input (reuses seed CLI's validation layers 2-6)
     let input;
     try {
@@ -365,17 +523,17 @@ export class TdaiGateway {
     }
 
     this.logger.info(
-      `Seed request: ${input.sessions.length} session(s), ` +
+      `Seed request: mode=${mode}, ${input.sessions.length} session(s), ` +
       `${input.totalRounds} round(s), ${input.totalMessages} message(s)`,
     );
 
-    // Resolve output directory: use gateway's data dir with a timestamped subfolder
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const ts =
-      `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
-      `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    const outputDir = `${this.config.data.baseDir}/seed-${ts}`;
+    // append: live memory-data; test: isolated throwaway run under memory-data/test-runs/.
+    const outputDir = mode === "test"
+      ? createSeedTestOutputDir(this.config.data.baseDir)
+      : this.config.data.baseDir;
+    if (mode === "test") {
+      this.logger.info(`Seed test mode outputDir=${outputDir}`);
+    }
 
     // Merge config overrides if provided
     // Start with the base memory config + inject llm config from gateway settings
@@ -420,14 +578,17 @@ export class TdaiGateway {
 
     this.logger.info(
       `Seed complete: sessions=${summary.sessionsProcessed}, rounds=${summary.roundsProcessed}, ` +
-      `l0=${summary.l0RecordedCount}, duration=${(summary.durationMs / 1000).toFixed(1)}s`,
+      `l0=${summary.l0RecordedCount}, l1=${summary.l1RecordedCount}, ` +
+      `duration=${(summary.durationMs / 1000).toFixed(1)}s`,
     );
 
     const response: SeedResponse = {
+      mode,
       sessions_processed: summary.sessionsProcessed,
       rounds_processed: summary.roundsProcessed,
       messages_processed: summary.messagesProcessed,
       l0_recorded: summary.l0RecordedCount,
+      l1_recorded: summary.l1RecordedCount,
       duration_ms: summary.durationMs,
       output_dir: summary.outputDir,
     };

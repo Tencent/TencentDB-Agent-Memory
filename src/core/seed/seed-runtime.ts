@@ -23,6 +23,7 @@ import { performAutoCapture } from "../hooks/auto-capture.js";
 import { createPipeline, createL2Runner, createL3Runner } from "../../utils/pipeline-factory.js";
 import type { PipelineInstance, PipelineLogger } from "../../utils/pipeline-factory.js";
 import { readManifest, writeManifest } from "../../utils/manifest.js";
+import { CheckpointManager } from "../../utils/checkpoint.js";
 import { StandaloneLLMRunnerFactory } from "../../adapters/standalone/llm-runner.js";
 import type { MemoryPipelineManager } from "../../utils/pipeline-manager.js";
 import type { LLMRunner } from "../types.js";
@@ -232,15 +233,31 @@ export async function executeSeed(
   let pipeline: PipelineInstance | undefined;
   let totalL0Recorded = 0;
   let roundsProcessed = 0;
+  let initialL1Count = 0;
 
   try {
+    try {
+      const checkpoint = new CheckpointManager(opts.outputDir, logger);
+      const cp = await checkpoint.read();
+      initialL1Count = cp.total_memories_extracted;
+    } catch (err) {
+      logger.warn(`${TAG} Failed to read initial L1 count: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Create and start pipeline (returns both the pipeline instance and the
     // seed-optimized config so we don't need to parse config again)
     const seed = await createSeedPipeline(opts);
     pipeline = seed.pipeline;
     const seedCfg = seed.cfg;
 
-    pipeline.scheduler.start({});
+    try {
+      const checkpoint = new CheckpointManager(opts.outputDir, logger);
+      const cp = await checkpoint.read();
+      pipeline.scheduler.start(checkpoint.getAllPipelineStates(cp));
+    } catch (err) {
+      logger.warn(`${TAG} Failed to restore checkpoint states, starting seed scheduler fresh: ${err instanceof Error ? err.message : String(err)}`);
+      pipeline.scheduler.start({});
+    }
     logger.info(`${TAG} Pipeline started, processing ${input.sessions.length} session(s), ${input.totalRounds} round(s)`);
 
     // Seed-specific: use 0 so the cold-start guard in captureAtomically()
@@ -378,12 +395,21 @@ export async function executeSeed(
   }
 
   const durationMs = Date.now() - startTime;
+  let l1RecordedCount = 0;
+  try {
+    const checkpoint = new CheckpointManager(opts.outputDir, logger);
+    const cp = await checkpoint.read();
+    l1RecordedCount = Math.max(0, cp.total_memories_extracted - initialL1Count);
+  } catch (err) {
+    logger.warn(`${TAG} Failed to read final L1 count: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   const summary: SeedSummary = {
     sessionsProcessed: input.sessions.length,
     roundsProcessed,
     messagesProcessed: input.totalMessages,
     l0RecordedCount: totalL0Recorded,
+    l1RecordedCount,
     durationMs,
     outputDir: opts.outputDir,
   };
@@ -394,7 +420,8 @@ export async function executeSeed(
     logger.info(
       `${TAG} Seed complete: sessions=${summary.sessionsProcessed}, ` +
       `rounds=${summary.roundsProcessed}, messages=${summary.messagesProcessed}, ` +
-      `l0Recorded=${summary.l0RecordedCount}, duration=${(durationMs / 1000).toFixed(1)}s`,
+      `l0Recorded=${summary.l0RecordedCount}, l1Recorded=${summary.l1RecordedCount}, ` +
+      `duration=${(durationMs / 1000).toFixed(1)}s`,
     );
   }
 

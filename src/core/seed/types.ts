@@ -135,6 +135,7 @@ export interface SeedSummary {
   roundsProcessed: number;
   messagesProcessed: number;
   l0RecordedCount: number;
+  l1RecordedCount: number;
   durationMs: number;
   outputDir: string;
 }
