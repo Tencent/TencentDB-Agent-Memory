@@ -1,0 +1,46 @@
+# TencentDB-Agent-Memory gateway config template for ArtifactTrace integration.
+#
+# Usage:
+# 1. Copy this file to TencentDB-Agent-Memory/tdai-gateway.yaml.
+# 2. Fill the environment variables before starting the gateway.
+# 3. Do not commit the real tdai-gateway.yaml if it contains API keys.
+
+server:
+  port: 8420
+  host: "127.0.0.1"
+  # Optional. Set this if the gateway is exposed beyond local development.
+  # apiKey: "${TDAI_GATEWAY_API_KEY}"
+  #
+  # Optional. Use ["*"] only for local browser-based development.
+  # corsOrigins: ["*"]
+
+data:
+  # Formal /seed mode=append writes memory files under this directory.
+  baseDir: "./memory-data"
+
+llm:
+  # LLM used by L1 extraction, conflict detection, and higher-level memory generation.
+  baseUrl: "${TDAI_LLM_BASE_URL}"
+  apiKey: "${TDAI_LLM_API_KEY}"
+  model: "${TDAI_LLM_MODEL}"
+  maxTokens: 4096
+  timeoutMs: 120000
+
+memory:
+  capture:
+    enabled: true
+
+  extraction:
+    enabled: true
+
+  recall:
+    enabled: true
+    strategy: "hybrid"
+
+  embedding:
+    enabled: true
+    provider: "openai"
+    baseUrl: "${TDAI_EMBEDDING_BASE_URL}"
+    apiKey: "${TDAI_EMBEDDING_API_KEY}"
+    model: "${TDAI_EMBEDDING_MODEL}"
+    dimensions: 4096
