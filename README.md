@@ -299,6 +299,23 @@ export MEMORY_TENCENTDB_LLM_BASE_URL="https://api.openai.com/v1"   # optional
 export MEMORY_TENCENTDB_LLM_MODEL="gpt-4o"                         # optional
 ```
 
+For long-running installs, you can use the Gateway config file instead. The
+Gateway automatically loads `~/.memory-tencentdb/memory-tdai/tdai-gateway.json`
+when it starts, so no extra env var is required:
+
+```bash
+mkdir -p ~/.memory-tencentdb/memory-tdai
+cat > ~/.memory-tencentdb/memory-tdai/tdai-gateway.json <<'JSON'
+{
+  "llm": {
+    "baseUrl": "https://your-api-endpoint/v1",
+    "apiKey": "your-api-key",
+    "model": "your-model-name"
+  }
+}
+JSON
+```
+
 **5. Start the Gateway** (three options — pick whichever fits):
 
 - **Auto-discovery (zero-config).** If you installed at one of the supported paths (`~/.memory-tencentdb/...` is one), the provider finds `src/gateway/server.ts` and `Popen()`s it as `node --import tsx <path>` when Hermes starts. Nothing extra to do.

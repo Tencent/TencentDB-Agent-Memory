@@ -304,6 +304,22 @@ export MEMORY_TENCENTDB_LLM_BASE_URL="https://api.openai.com/v1"   # 可选
 export MEMORY_TENCENTDB_LLM_MODEL="gpt-4o"                         # 可选
 ```
 
+长期使用时，也可以改用 Gateway 配置文件。Gateway 启动时会自动读取
+`~/.memory-tencentdb/memory-tdai/tdai-gateway.json`，无需额外设置环境变量：
+
+```bash
+mkdir -p ~/.memory-tencentdb/memory-tdai
+cat > ~/.memory-tencentdb/memory-tdai/tdai-gateway.json <<'JSON'
+{
+  "llm": {
+    "baseUrl": "https://your-api-endpoint/v1",
+    "apiKey": "your-api-key",
+    "model": "your-model-name"
+  }
+}
+JSON
+```
+
 **5. 启动 Gateway**（三种方式任选其一）：
 
 - **自动发现（零配置）**：若插件装在支持的路径下（`~/.memory-tencentdb/...` 就是其中之一），provider 会自动找到 `src/gateway/server.ts` 并以 `node --import tsx <path>` 的形式 `Popen()` 拉起，不需要任何额外配置。
