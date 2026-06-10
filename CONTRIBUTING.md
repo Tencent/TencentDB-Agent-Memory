@@ -126,7 +126,7 @@ If you discover a security vulnerability, please report it via the email agentme
 
 ## License
 
-By submitting a contribution, you agree that your code will be licensed under the [MIT License](./LICENSE).
+By submitting a contribution, you agree that your code will be licensed under the [MIT License](./LICENSE-MIT).
 
 ---
 

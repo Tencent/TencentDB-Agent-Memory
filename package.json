@@ -48,7 +48,7 @@
     "openclaw.plugin.json",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE",
+    "LICENSE-MIT",
     "!src/**/*.test.ts",
     "!src/**/*.spec.ts",
     "!src/**/__tests__/"

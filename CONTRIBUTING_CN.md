@@ -126,7 +126,7 @@ git commit -s -m "feat(store): add batch insert support"
 
 ## 许可证
 
-提交贡献即表示你同意你的代码将在 [MIT License](./LICENSE) 下许可。
+提交贡献即表示你同意你的代码将在 [MIT License](./LICENSE-MIT) 下许可。
 
 ---
 
