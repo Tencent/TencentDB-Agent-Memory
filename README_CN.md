@@ -204,8 +204,8 @@ bash scripts/openclaw-after-tool-call-messages.patch.sh
 
 | 你的场景 | 走哪条路 |
 |---|---|
-| 想从零启动一个带记忆能力的 Hermes（一条命令搞定） | **2.A Docker**（下文） |
-| **已经装好了 Hermes**，只想加上记忆能力 | **2.B 挂到已有 Hermes 上**（再下文） |
+| 想从零启动一个带记忆能力的 Hermes（一条命令搞定） | 2.A Docker（下文） |
+| 已经装好了Hermes，只想加上记忆能力 | 2.B 挂到已有 Hermes 上（再下文） |
 
 #### 2.A Docker（全新部署，需版本号 ≥ 0.3.4）
 
