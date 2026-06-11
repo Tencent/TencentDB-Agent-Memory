@@ -195,16 +195,16 @@ bash scripts/openclaw-after-tool-call-messages.patch.sh
 
 ### 2. Hermes
 
-In addition to OpenClaw, this plugin also supports [Hermes](https://github.com/NousResearch/hermes-agent) Agent. Two installation paths exist; pick by deployment scenario:
+In addition to OpenClaw, this plugin also supports [Hermes](https://github.com/NousResearch/hermes-agent) Agent. Choose the installation path based on your deployment scenario:
 
 | You want to … | Use |
 |---|---|
-| Spin up a memory-enabled Hermes from scratch in one command | **2.A Docker** (below) |
-| Add memory to an **existing** Hermes install | **2.B Plug into an existing Hermes** (next section) |
+| Spin up a memory-enabled Hermes from scratch in one command | 2.A Docker (below) |
+| Add memory to an existing Hermes install | 2.B Plug into an existing Hermes (next section) |
 
 #### 2.A Docker (greenfield, requires version ≥ 0.3.4)
 
-The Docker image bundles `hermes-agent` and the `memory_tencentdb` provider side-by-side and exposes the Gateway on `:8420`:
+The Docker image bundles `hermes-agent` and the `memory_tencentdb` provider together. The Gateway listens on `:8420`:
 
 ```bash
 # ============ Configuration Parameters ============
@@ -253,59 +253,69 @@ docker exec -it hermes-memory hermes
 
 > The image ships with Tencent Cloud DeepSeek-V3.2 as the default. If you use this model, omit `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_PROVIDER` and pass only `MODEL_API_KEY`.
 
-#### 2.B Plug into an existing Hermes (no Docker)
+#### 2.B Attach to Existing Hermes (No Docker)
 
-If `hermes-agent` is already installed on the host and you only want to add the memory provider, you don't need the Docker image. Two things must happen: drop the Python provider into `hermes-agent/plugins/memory/memory_tencentdb/`, then let it find or launch the Node.js Gateway sidecar.
+If you already have `hermes-agent` installed on your host and just want to add memory capabilities, **no Docker image is needed**.
 
-**1. Install the npm package (Gateway source lives inside it):**
-
-```bash
-npm install -g @tencentdb-agent-memory/memory-tencentdb@0.3.6
-# Or pin into a known location, e.g.
-mkdir -p ~/.memory-tencentdb && cd ~/.memory-tencentdb
-npm install @tencentdb-agent-memory/memory-tencentdb@0.3.6
-# This puts the plugin at:
-#   ~/.memory-tencentdb/node_modules/@tencentdb-agent-memory/memory-tencentdb/
-```
-
-**2. Mount the Python provider into your Hermes checkout** (pick one):
+**1. Download the plugin package to a unified directory**:
 
 ```bash
-PLUGIN_ROOT=~/.memory-tencentdb/node_modules/@tencentdb-agent-memory/memory-tencentdb
-
-# (a) symlink — preferred while iterating, picks up `npm update` automatically
-ln -s "$PLUGIN_ROOT/hermes-plugin/memory/memory_tencentdb" \
-      <hermes-agent-checkout>/plugins/memory/memory_tencentdb
-
-# (b) copy — frozen vendoring
-cp -r "$PLUGIN_ROOT/hermes-plugin/memory/memory_tencentdb" \
-      <hermes-agent-checkout>/plugins/memory/memory_tencentdb
+mkdir -p ~/.memory-tencentdb
+TEMP_DIR=$(mktemp -d)
+cd "$TEMP_DIR"
+npm init -y --silent
+npm install @tencentdb-agent-memory/memory-tencentdb@latest --omit=dev
+cp -r node_modules/@tencentdb-agent-memory/memory-tencentdb \
+      ~/.memory-tencentdb/tdai-memory-openclaw-plugin
+rm -rf "$TEMP_DIR"
 ```
 
-> The directory name must be **`memory_tencentdb`** (underscore) — Hermes uses that as the provider key. `memory-tencentdb` (hyphen) is a config-side alias, not a valid directory name.
+**2. Install Gateway dependencies**:
 
-**3. Tell Hermes to use the provider** in `~/.hermes/config.yaml`:
+```bash
+cd ~/.memory-tencentdb/tdai-memory-openclaw-plugin
+npm install --omit=dev
+npm install tsx
+```
+
+**3. Link to the Hermes plugin directory**:
+
+```bash
+rm -rf ~/.hermes/hermes-agent/plugins/memory/memory_tencentdb
+ln -sf ~/.memory-tencentdb/tdai-memory-openclaw-plugin/hermes-plugin/memory/memory_tencentdb \
+       ~/.hermes/hermes-agent/plugins/memory/memory_tencentdb
+```
+
+> The directory **must** be named `memory_tencentdb` (with an underscore) — Hermes uses this as the provider key. `memory-tencentdb` (with a hyphen) is only an alias at the config level and **cannot** be used as the directory name.
+
+**4. Declare the provider in `~/.hermes/config.yaml`**:
 
 ```yaml
 memory:
   provider: memory_tencentdb
 ```
 
-**4. Configure the Gateway's LLM credentials** in the Hermes process environment:
+**5. Configure Gateway environment variables**
+
+Edit `~/.hermes/.env` and add:
 
 ```bash
-export MEMORY_TENCENTDB_LLM_API_KEY="sk-..."
-export MEMORY_TENCENTDB_LLM_BASE_URL="https://api.openai.com/v1"   # optional
-export MEMORY_TENCENTDB_LLM_MODEL="gpt-4o"                         # optional
+MEMORY_TENCENTDB_GATEWAY_CMD="sh -c 'cd ~/.memory-tencentdb/tdai-memory-openclaw-plugin && exec npx tsx src/gateway/server.ts'"
+MEMORY_TENCENTDB_GATEWAY_HOST="127.0.0.1"
+MEMORY_TENCENTDB_GATEWAY_PORT="8420"
 ```
 
-For long-running installs, you can use the Gateway config file instead. The
-Gateway automatically loads `~/.memory-tencentdb/memory-tdai/tdai-gateway.json`
-when it starts, so no extra env var is required:
+Add LLM credentials as needed (the Gateway actually reads the `TDAI_LLM_*` variables):
 
 ```bash
-mkdir -p ~/.memory-tencentdb/memory-tdai
-cat > ~/.memory-tencentdb/memory-tdai/tdai-gateway.json <<'JSON'
+TDAI_LLM_API_KEY="sk-your-api-key-here"
+TDAI_LLM_BASE_URL="https://api.openai.com/v1"
+TDAI_LLM_MODEL="gpt-4o"
+```
+
+Alternatively, use a Gateway config file at `~/.memory-tencentdb/memory-tdai/tdai-gateway.json`:
+
+```json
 {
   "llm": {
     "baseUrl": "https://your-api-endpoint/v1",
@@ -313,24 +323,26 @@ cat > ~/.memory-tencentdb/memory-tdai/tdai-gateway.json <<'JSON'
     "model": "your-model-name"
   }
 }
-JSON
 ```
 
-**5. Start the Gateway** (three options — pick whichever fits):
+**6. Start the Gateway** (choose one of two methods):
 
-- **Auto-discovery (zero-config).** If you installed at one of the supported paths (`~/.memory-tencentdb/...` is one), the provider finds `src/gateway/server.ts` and `Popen()`s it as `node --import tsx <path>` when Hermes starts. Nothing extra to do.
-- **Explicit auto-start.** Override discovery by setting the command yourself: `export MEMORY_TENCENTDB_GATEWAY_CMD="node --import tsx /abs/path/to/memory-tencentdb/src/gateway/server.ts"`.
-- **Run it yourself.** Start the Gateway separately before launching Hermes; the provider detects it on `127.0.0.1:8420` via `/health` and skips the subprocess-launch path.
+- **Auto-discovery on conversation (recommended, zero-config)**: Don't start the Gateway manually — just start talking to Hermes. The provider will auto-detect `~/.memory-tencentdb/tdai-memory-openclaw-plugin/src/gateway/server.ts` and launch it via `Popen()` on the first conversation. The initial conversation may have a slight delay.
+- **Manual run**: Start a standalone Gateway process in advance:
+  ```bash
+  cd ~/.memory-tencentdb/tdai-memory-openclaw-plugin
+  npx tsx src/gateway/server.ts
+  ```
 
-**6. Verify:**
+**7. Verify**:
 
 ```bash
 curl http://127.0.0.1:8420/health
-# Then start Hermes; the agent.log should print:
-#   memory-tencentdb Gateway command auto-discovered: /…/src/gateway/server.ts
+# Should return {"status":"ok"} or {"status":"degraded"}
 ```
 
-> The provider's full reference (env-var table, troubleshooting, LLM tool schemas, supervisor behaviour) lives in [`hermes-plugin/memory/memory_tencentdb/README.md`](./hermes-plugin/memory/memory_tencentdb/README.md) — read it before touching the supervisor / circuit-breaker defaults.
+> For the complete provider reference (environment variables, troubleshooting, LLM tool schemas, supervisor behavior), see [`hermes-plugin/memory/memory_tencentdb/README.md`](./hermes-plugin/memory/memory_tencentdb/README.md). Please read it before adjusting the supervisor / circuit-breaker defaults.
+
 
 ---
 
