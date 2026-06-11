@@ -139,13 +139,14 @@ graph LR
 ### 1.1 安装插件
 
 ```bash
-openclaw plugins install @tencentdb-agent-memory/memory-tencentdb@0.3.6
+openclaw plugins install @tencentdb-agent-memory/memory-tencentdb
 openclaw gateway restart
 ```
 
-OpenClaw 安装请使用精确版本。OpenClaw 不支持 `^0.3.6` 这类 npm semver
-范围；如果直接使用 npm 安装，请运行
-`npm install --save-exact @tencentdb-agent-memory/memory-tencentdb@0.3.6`。
+> 升级插件请优先使用 OpenClaw 原生更新命令，该方式可以避免因语义化版本范围导致插件禁用：
+> ```bash
+> openclaw plugins update @tencentdb-agent-memory/memory-tencentdb
+> ```
 
 ### 1.2 零配置启用
 
