@@ -862,7 +862,7 @@ class MemoryTencentdbProvider(MemoryProvider):
         """No-op — recall is done synchronously in prefetch()."""
         pass
 
-    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "", messages: list | None = None) -> None:
         """Send the turn to Gateway for capture (non-blocking).
 
         Threading model:
@@ -895,6 +895,7 @@ class MemoryTencentdbProvider(MemoryProvider):
                     assistant_content=assistant_content,
                     session_key=effective_session,
                     user_id=self._user_id,
+                    messages=messages,
                 )
                 self._record_success()
             except Exception as e:

@@ -126,6 +126,7 @@ class MemoryTencentdbSdkClient:
         session_key: str,
         session_id: str = "",
         user_id: str = "",
+        messages: list | None = None,
     ) -> Dict[str, Any]:
         """Capture a conversation turn (sync_turn)."""
         body: Dict[str, Any] = {
@@ -137,6 +138,8 @@ class MemoryTencentdbSdkClient:
             body["session_id"] = session_id
         if user_id:
             body["user_id"] = user_id
+        if messages:
+            body["messages"] = messages
         return self._post("/capture", body)
 
     def search_memories(self, query: str, limit: int = 5, type_filter: str = "", scene: str = "") -> Dict[str, Any]:
