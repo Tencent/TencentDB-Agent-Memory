@@ -52,6 +52,7 @@ import type { OffloadConfig } from "../config.js";
 import type { PluginConfig, PluginLogger } from "./types.js";
 import { BackendClient } from "./backend-client.js";
 import { LocalLlmClient } from "./local-llm/index.js";
+import { resolveApiKeyFromAuthProfile } from "./auth-profile-key.js";
 import type { L1Request, L15Request, L2Request } from "./backend-client.js";
 import { parseMmdMeta } from "./mmd-meta.js";
 import { sanitizeText, writeRefMd } from "./storage.js";
@@ -368,7 +369,10 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
       const models = (api.config as any)?.models;
       const providerCfg = models?.providers?.[providerKey];
       const baseUrl = providerCfg?.baseUrl ?? providerCfg?.baseURL;
-      const apiKey = providerCfg?.apiKey;
+      // Key resolution: prefer the plaintext key in models.providers, then fall
+      // back to OpenClaw's auth-profile store (issue #90). The fallback is a
+      // synchronous no-op on hosts that don't expose the auth-profile SDK.
+      const apiKey = providerCfg?.apiKey ?? resolveApiKeyFromAuthProfile(api, providerKey, logger);
 
       if (baseUrl && apiKey) {
         backendClient = new LocalLlmClient(
@@ -377,7 +381,7 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
         );
       } else {
         logger.error(
-          `[context-offload] Local LLM mode failed: provider "${providerKey}" not found or missing baseUrl/apiKey in models.providers. ` +
+          `[context-offload] Local LLM mode failed: provider "${providerKey}" not found or missing baseUrl/apiKey in models.providers (or auth profiles). ` +
           `L1/L1.5/L2 disabled.`,
         );
       }
