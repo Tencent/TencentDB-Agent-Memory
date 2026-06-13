@@ -32,7 +32,7 @@ import type {
 import type { MemoryTdaiConfig } from "../config.js";
 import type { IMemoryStore } from "./store/types.js";
 import type { EmbeddingService } from "./store/embedding.js";
-import type { StorageAdapter } from "./storage/adapter.js";
+import { StorageAdapter, type StorageAdapter } from "./storage/adapter.js";
 import { LocalStorageBackend } from "./storage/local-backend.js";
 import { performAutoRecall } from "./hooks/auto-recall.js";
 import { reportRecallMetrics } from "./report/metric-tracking-recall.js";
@@ -146,7 +146,7 @@ export class TdaiCore {
     // for the OpenClaw host-adapter entry. We restore the auto-wire here so
     // standalone installs stop emitting the CR-2 guard warning, while
     // service-mode callers that pass a custom storage still win.
-    this.storage = opts.storage ?? new LocalStorageBackend({ rootDir: this.dataDir, logger: this.logger });
+    this.storage = opts.storage ?? new StorageAdapter(new LocalStorageBackend({ rootDir: this.dataDir, logger: this.logger }));
   }
 
   // ============================
