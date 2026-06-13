@@ -1395,7 +1395,7 @@ export class VectorStore implements IMemoryStore {
 
       const rows = raw as unknown as L1RecordRow[];
 
-      this.logger?.info(
+      this.logger?.debug?.(
         `${TAG} [L1-query] filter={sessionKey=${sessionKey ?? "(all)"}, sessionId=${sessionId ?? "(all)"}, updatedAfter=${updatedAfter ?? "(none)"}}, ` +
         `returned ${rows.length} record(s)`,
       );
